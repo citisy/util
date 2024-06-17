@@ -200,8 +200,8 @@ class ModuleManager:
             module.train = lambda self, mode=True: self
 
     @staticmethod
-    def convert_to_quantized_module(module: nn.Module, trace_func=None, backend='fbgemm'):
-        """note, can not convert Embedding layer"""
+    def quantized_by_pytorch(module: nn.Module, trace_func=None, backend='fbgemm'):
+        """see https://pytorch.org/docs/stable/quantization.html"""
         module.eval()
         module.qconfig = torch.quantization.get_default_qconfig(backend)
         torch.quantization.prepare(module, inplace=True)
@@ -212,11 +212,20 @@ class ModuleManager:
         torch.quantization.convert(module, inplace=True)
 
     @staticmethod
-    def low_memory_run(module: nn.Module, device, *args, **kwargs):
+    def quantized_by_quanto(module: nn.Module, weights='qint8', activations=None, **kwargs):
+        """see https://github.com/huggingface/quanto"""
+        import quanto
+        quanto.quantize(module, weights=weights, activations=activations, **kwargs)
+        for name, m in module.named_modules():
+            if hasattr(m, 'freeze'):
+                m.freeze()
+
+    @staticmethod
+    def low_memory_run(module: nn.Module, call_func, device, *args, **kwargs):
         """only send the module to gpu when the module need to be run,
         and the gpu will be released after running"""
         module.to(device)
-        obj = module(*args, **kwargs)
+        obj = call_func(*args, **kwargs)
         module.cpu()
         torch.cuda.empty_cache()
         return obj
@@ -295,12 +304,25 @@ class ModuleManager:
         return weight
 
     @staticmethod
-    def get_module_by_name(module, key=None, include=(), exclude=(), is_last=False):
-        """
+    def get_module_by_name(module, tensor_name: str):
+        if "." in tensor_name:
+            splits = tensor_name.split(".")
+            for split in splits:
+                new_module = getattr(module, split)
+                if new_module is None:
+                    raise ValueError(f"{module} has no attribute {split}.")
+                module = new_module
+        return module
+
+    @staticmethod
+    def get_module_by_key(module, key=None, include=(), exclude=(), is_last_module=False, is_return_last_module=False):
+        """return: [[finded_module, name, full_name]]
+
         >>> module = ...
-        >>> ModuleManager.get_module_by_name(module, key='q')
-        >>> ModuleManager.get_module_by_name(module, include=('q', 'k', 'v'), exclude=('l0.q', 'l0.k', 'l0.v'))
+        >>> ModuleManager.get_module_by_key(module, key='q')
+        >>> ModuleManager.get_module_by_key(module, include=('q', 'k', 'v'), exclude=('l0.q', 'l0.k', 'l0.v'))
         """
+
         def cur(current_m: nn.Module, prev_name=''):
             for name, m in current_m._modules.items():
                 if m is None:
@@ -308,17 +330,23 @@ class ModuleManager:
 
                 full_name = f'{prev_name}.{name}'[1:]
 
-                if is_last:
+                if is_last_module:
                     for k in include:
                         if full_name.endswith(k):
-                            r.append((current_m, name, full_name))
+                            r.append((return_module(current_m, name), name, full_name))
 
                 elif len(m._modules) == 0:
                     if is_find(full_name):
-                        r.append((current_m, name, full_name))
+                        r.append((return_module(current_m, name), name, full_name))
 
                 if len(m._modules) > 0:
                     cur(m, f'{prev_name}.{name}')
+
+        def return_module(m, name=None):
+            if is_return_last_module:
+                return getattr(m, name)
+            else:
+                return m
 
         def is_find(name):
             flag = False
@@ -334,9 +362,20 @@ class ModuleManager:
 
         r = []
         if key is not None:
-            include += (key, )
+            include += (key,)
         cur(module)
         return r
+
+    @classmethod
+    def apply(cls, module, func, key=None, include=(), exclude=(), is_last=False, **func_kwargs):
+        """
+        # freeze encoder and decoder layer, train the head layer
+        >>> ModuleManager.apply(nn.Module(), ModuleManager.freeze_module, include=('encoder', 'decoder'), exclude=('head', ), is_last=True)
+        """
+        objs = cls.get_module_by_key(module, key=key, include=include, exclude=exclude, is_last_module=is_last)
+
+        for current_m, name, full_name in objs:
+            func(current_m, **func_kwargs)
 
 
 class WeightsFormats:
@@ -385,6 +424,17 @@ class Export:
     @staticmethod
     def to_onnx(model, f, *trace_input, **export_kwargs):
         torch.onnx.export(model=model, f=f, args=trace_input, **export_kwargs)
+
+    @staticmethod
+    def to_state_dict_by_name(model, key=None, include=(), exclude=(), is_last=False):
+        objs = ModuleManager.get_module_by_key(model, key=key, include=include, exclude=exclude, is_last_module=is_last)
+
+        state_dict = OrderedDict()
+        for current_m, _, full_name in objs:
+            for name, tensors in current_m.state_dict():
+                state_dict[f'{full_name}.{name}'] = tensors
+
+        return state_dict
 
 
 class Load:
@@ -737,3 +787,37 @@ class Converter:
             d[k] = v
 
         return d
+
+
+def make_optimizer_cls(optimizer_type: str):
+    if optimizer_type in {"Lion"}:
+        import lion_pytorch
+        return getattr(lion_pytorch, optimizer_type)
+
+    elif optimizer_type in {
+        'AdamW8bit', 'SGDNesterov8bit', 'Lion8bit', 'PagedAdamW8bit', 'PagedLion8bit',
+        'PagedAdamW', 'PagedAdamW32bit', ''
+    }:
+        import bitsandbytes as bnb
+        return getattr(bnb, optimizer_type)
+
+    elif optimizer_type in {'DAdaptAdaGrad', 'DAdaptAdam', 'DAdaptAdan', 'DAdaptLion', 'DAdaptSGD'}:
+        import dadaptation
+        return getattr(dadaptation, optimizer_type)
+
+    elif optimizer_type in {'DAdaptAdamPreprint', 'DAdaptAdanIP'}:
+        from dadaptation import experimental
+        return getattr(experimental, optimizer_type)
+
+    elif optimizer_type in {'Prodigy'}:
+        import prodigyopt
+        return getattr(prodigyopt, optimizer_type)
+
+    elif optimizer_type in {'SGD', 'AdamW', }:
+        return getattr(torch.optim, optimizer_type)
+
+    elif optimizer_type in {'Adafactor'}:
+        from transformers import optimization
+        return getattr(optimization, optimizer_type)
+
+

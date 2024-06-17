@@ -3,7 +3,6 @@ import json
 import os
 import pickle
 import time
-import psutil
 import uuid
 import yaml
 import configparser
@@ -143,12 +142,13 @@ class Saver:
     def save_img(self, obj: np.ndarray, path, **kwargs):
         # it will error with chinese path in low version of cv2
         # it has fixed in high version already
-        # cv2.imencode('.png', obj)[1].tofile(path)
-        flag = cv2.imwrite(path, obj)
-        if flag:
-            self.stdout(path)
-        else:
-            self.stderr(path)
+        cv2.imencode('.png', obj)[1].tofile(path)
+        self.stdout(path)
+        # flag = cv2.imwrite(path, obj)
+        # if flag:
+        #     self.stdout(path)
+        # else:
+        #     self.stderr(path)
 
     def save_np_array(self, obj: np.ndarray, path, **kwargs):
         np.savetxt(path, obj, **kwargs)
@@ -292,6 +292,12 @@ class Loader:
         self.stdout(path)
         return obj
 
+    def load_txt_dir(self, dirt: str or Path, fmt='*.txt'):
+        txts = []
+        for fp in Path(dirt).glob(fmt):
+            txts.append(self.load_txt(fp))
+        return txts
+
     def load_pkl(self, path):
         with open(path, 'rb') as f:
             obj = pickle.load(f)
@@ -309,8 +315,9 @@ class Loader:
     def load_img(self, path, channel_fixed_3=False) -> np.ndarray:
         # it will error with chinese path in low version of cv2
         # it has fixed in high version already
-        # img = cv2.imdecode(np.fromfile(path, dtype=np.uint8), -1)
-        img = cv2.imread(path)
+        # but still bugs with `cv2.imread`, so still use the following method to read images
+        img = cv2.imdecode(np.fromfile(path, dtype=np.uint8), -1)
+        # img = cv2.imread(path)
         assert img is not None
 
         if channel_fixed_3:
@@ -371,6 +378,7 @@ class Loader:
             self,
             obj: str or bytes, scale_ratio: float = 1.33,
     ) -> List[np.ndarray]:
+        # pip install pdf2image
         from pdf2image import convert_from_path, convert_from_bytes, exceptions
 
         dpi = 72 * scale_ratio
