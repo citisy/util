@@ -398,10 +398,6 @@ class Loader:
         return images
 
 
-saver = Saver()
-loader = Loader()
-
-
 class Cacher:
     def __init__(self, saver=None, loader=None, deleter=None, max_size=None):
         self.saver = saver
@@ -601,7 +597,7 @@ class MongoDBCacher:
     def cache_one(self, obj: dict, _id=None):
         self.delete_over_range()
 
-        obj['update_time'] = int(time.time())
+        obj.setdefault('update_time', int(time.time()))
         if _id is None:
             x = self.collection.insert_one(obj)
             _id = x.inserted_id
@@ -647,7 +643,64 @@ class MongoDBCacher:
 
 
 class RedisCacher:
-    """todo"""
+    def __init__(self, host='127.0.0.1', port=6379, db=0,
+                 max_size=None, verbose=True, stdout_method=print, stdout_fmt='Save _id[%s] successful!',
+                 **mongo_kwargs) -> None:
+        import redis
+
+        self.client = redis.Redis(host=host, port=port, db=db)
+        self.max_size = max_size
+        self.verbose = verbose
+        self.stdout_method = stdout_method if verbose else FakeIo()
+        self.stdout_fmt = stdout_fmt
+
+    def __call__(self, *args, **kwargs):
+        return self.cache_one(*args, **kwargs)
+
+    def cache_one(self, obj: dict, _id=None):
+        self.delete_over_range()
+
+        s = int(time.time())
+        obj.setdefault('update_time', s)
+        if _id is None:
+            _id = s
+
+        self.client.hmset(_id, obj)
+        self.stdout_method(self.stdout_fmt % _id)
+        return _id
+
+    def cache_batch(self, objs, _ids=None):
+        self.delete_over_range(len(objs))
+        s = int(time.time())
+        _ids = _ids or [f'{s}_{i}' for i in range(len(objs))]
+
+        for _id, obj in zip(_ids, objs):
+            obj.setdefault('update_time', s)
+            self.client.hmset(_id, obj)
+            self.stdout_method(self.stdout_fmt % _id)
+
+        return _ids
+
+    def delete_over_range(self, batch_size=1):
+        if not self.max_size:
+            return
+
+        if self.client.dbsize > self.max_size - batch_size:
+            raise NotImplementedError
+            self.client.delete()
+
+    def get_one(self, _id=None):
+        if _id is None:
+            _id = self.client.randomkey()
+        return self.client.hgetall(_id)
+
+    def get_batch(self, _ids=None, size=None):
+        rets = []
+        if _ids is None:
+            _ids = [self.client.randomkey() for _ in range(size)]
+        for _id in _ids:
+            rets.append(self.get_one(_id))
+        return rets
 
 
 class ESCacher:
@@ -712,3 +765,7 @@ class FakeApp:
 
     def get(self, *args, **kwargs):
         return nullcontext
+
+
+saver = Saver()
+loader = Loader()
