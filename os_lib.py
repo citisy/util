@@ -36,7 +36,7 @@ suffixes_dict = dict(
     joblib=('.joblib',),
     img=('.jpg', '.jpeg', '.png', '.bmp', '.tiff'),
     csv=('.csv', '.tsv'),
-    xlsx=('.xlsx', '.xls'),
+    excel=('.xlsx', '.xls'),
     word=('.docx', '.doc'),
     pdf=('.pdf',),
     np=('.npy', '.npz')
@@ -73,7 +73,8 @@ class Saver:
             suffixes_dict['pkl']: self.save_pkl,
             suffixes_dict['joblib']: self.save_joblib,
             suffixes_dict['img']: self.save_img,
-            suffixes_dict['csv']: self.save_csv
+            suffixes_dict['csv']: self.save_csv,
+            suffixes_dict['excel']: self.save_excel
         }
 
     def stdout(self, path):
@@ -137,6 +138,10 @@ class Saver:
         with open(path, 'wb') as f:
             f.write(obj)
 
+        self.stdout(path)
+
+    def save_excel(self, obj: pd.DataFrame, path, **kwargs):
+        obj.to_excel(path, **kwargs)
         self.stdout(path)
 
     def save_img(self, obj: np.ndarray, path, **kwargs):
@@ -248,6 +253,7 @@ class Loader:
             suffixes_dict['txt']: self.load_txt,
             suffixes_dict['pkl']: self.load_pkl,
             suffixes_dict['img']: self.load_img,
+            suffixes_dict['excel']: self.load_excel
         }
 
     def stdout(self, path):
@@ -311,6 +317,11 @@ class Loader:
 
         self.stdout(path)
         return obj
+
+    def load_excel(self, path, **kwargs) -> pd.DataFrame:
+        df = pd.read_excel(path, **kwargs)
+        self.stdout(path)
+        return df
 
     def load_img(self, path, channel_fixed_3=False) -> np.ndarray:
         # it will error with chinese path in low version of cv2
