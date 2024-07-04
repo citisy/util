@@ -409,39 +409,64 @@ class Loader:
         return images
 
 
-class Cacher:
+class BaseCacher:
+    RANDOM = 0
+    OLDEST = 1
+    LATEST = 2
+
+    cache_stdout_fmt = 'Save _id[%s] successful!'
+    delete_stdout_fmt = 'Delete _id[%s] successful!'
+    get_stdout_fmt = 'Get _id[%s] successful!'
+
+    def __call__(self, *args, **kwargs):
+        return self.cache_one(*args, **kwargs)
+
+    def cache_one(self, obj, _id=None, **kwargs):
+        raise NotImplemented
+
+    def cache_batch(self, objs, _ids=None, **kwargs):
+        raise NotImplemented
+
+    def delete_over_range(self, **kwargs):
+        raise NotImplemented
+
+    def get_one(self, _id=None, key=None, search_type=None, **kwargs):
+        raise NotImplemented
+
+    def get_batch(self, _ids=None, key=None, size=None, search_type=None, **kwargs):
+        raise NotImplemented
+
+
+class Cacher(BaseCacher):
     def __init__(self, saver=None, loader=None, deleter=None, max_size=None):
         self.saver = saver
         self.loader = loader
         self.deleter = deleter
         self.max_size = max_size
 
-    def __call__(self, *args, **kwargs):
-        return self.cache_one(*args, **kwargs)
-
-    def cache_one(self, obj, _id=None):
+    def cache_one(self, obj, _id=None, **kwargs):
         self.delete_over_range()
         return self.saver(obj, _id=_id)
 
-    def cache_batch(self, objs, _ids=None):
+    def cache_batch(self, objs, _ids=None, **kwargs):
         _ids = _ids or [None] * len(objs)
         return [self.cache_one(obj, _id=_id) for obj, _id in zip(objs, _ids)]
 
-    def delete_over_range(self):
+    def delete_over_range(self, **kwargs):
         if not self.max_size:
             return
 
         if len(self.saver) >= self.max_size:
             self.deleter()
 
-    def get_one(self, _id=None):
+    def get_one(self, _id=None, **kwargs):
         return self.loader(_id)
 
-    def get_batch(self, _ids=()):
+    def get_batch(self, _ids=(), **kwargs):
         return [self.get_one(_id) for _id in _ids]
 
 
-class MemoryCacher:
+class MemoryCacher(BaseCacher):
     def __init__(self, max_size=None,
                  verbose=True, stdout_method=print,
                  **saver_kwargs
@@ -451,67 +476,90 @@ class MemoryCacher:
         self.stdout_method = stdout_method if verbose else FakeIo()
         self.cache = {}
 
-    def __call__(self, *args, **kwargs):
-        return self.cache_one(*args, **kwargs)
-
-    def cache_one(self, obj, _id=None, stdout_fmt='Save (%s, %s) successful!'):
+    def cache_one(self, obj, _id=None, **kwargs):
         time_str = time.time()
         uid = str(uuid.uuid4())
         if _id is None:
-            _id = (uid, time_str)
-        self.delete_over_range(stdout_fmt.replace('Save', 'Delete'))
+            _id = (time_str, uid)
+        self.delete_over_range()
         self.cache[_id] = obj
-        self.stdout_method(stdout_fmt % _id)
+        self.stdout_method(self.cache_stdout_fmt % str(_id))
         return _id
 
-    def cache_batch(self, objs, _ids=None, stdout_fmt='Save (%s, %s) successful!'):
+    def cache_batch(self, objs, _ids=None, **kwargs):
         _ids = _ids or [None] * len(objs)
         ids = []
         for i, obj in enumerate(objs):
-            _id = self.cache_one(obj, stdout_fmt=stdout_fmt)
+            _id = self.cache_one(obj)
             ids.append(_id)
         return ids
 
-    def delete_over_range(self, stdout_fmt='Delete (%s, %s) successful!'):
+    def _search(self, keys, size=None, search_type=None):
+        search_type = search_type or self.RANDOM
+        size = 1 if size is None else size
+        size = min(size, len(keys))
+
+        if search_type == self.RANDOM:
+            ids = np.random.choice(len(keys), size, replace=False)
+            return [keys[i] for i in ids]
+
+        elif search_type == self.OLDEST:
+            keys = sorted(keys)
+            return keys[:size]
+
+        elif search_type == self.LATEST:
+            keys = sorted(keys)
+            return keys[-size:]
+
+    def delete_over_range(self, **kwargs):
         if not self.max_size:
             return
 
         if len(self.cache) >= self.max_size:
-            key = min(self.cache.keys(), key=lambda x: x[1])
-            self.cache.pop(key)
-            self.stdout_method(stdout_fmt % key)
+            _ids = self._search(list(self.cache.keys()), len(self.cache) - self.max_size, search_type=self.OLDEST)
+            for _id in _ids:
+                self.cache.pop(_id)
+                self.stdout_method(self.delete_stdout_fmt % str(_id))
 
-    def get_one(self, _id=None, stdout_fmt='Get (%s, %s) successful!'):
+    def get_one(self, _id=None, key=None, search_type=None, **kwargs):
         if _id is None:
-            _id = random.choice(list(self.cache.keys()))
-        self.stdout_method(stdout_fmt % _id)
-        return self.cache[_id]
+            keys = list(self.cache.keys())
 
-    def get_batch(self, _ids=None, size=None, stdout_fmt='Get %s successful!'):
+            if key is not None:
+                keys = [k for k in keys if key in k]
+
+            _id = self._search(keys, search_type=search_type)
+            if len(_id) == 0:
+                return None
+            _id = _id[0]
+
+        self.stdout_method(self.get_stdout_fmt % str(_id))
+        return self.cache.get(_id)
+
+    def get_batch(self, _ids=None, key=None, size=None, search_type=None, **kwargs):
         if _ids is None:
             keys = list(self.cache.keys())
-            _ids = np.random.choice(range(len(keys)), size, replace=False)
-            _ids = [keys[_] for _ in _ids]
 
-        self.stdout_method(stdout_fmt % str(_ids))
-        return [self.cache[_id] for _id in _ids]
+            if key is not None:
+                keys = [k for k in keys if key in k]
+
+            _ids = self._search(keys, size, search_type=search_type)
+
+        self.stdout_method(self.get_stdout_fmt % str(_ids))
+        return [self.cache.get(_id) for _id in _ids]
 
 
-class FileCacher:
+class FileCacher(BaseCacher):
     def __init__(self, cache_dir=None, max_size=None,
-                 verbose=True, stdout_method=print, stdout_fmt='Have deleted %s successful!',
-                 saver_kwargs=dict(), loader_kwargs=dict()):
+                 verbose=True, stdout_method=print,
+                 ):
         mk_dir(cache_dir)
         self.cache_dir = Path(cache_dir)
         self.max_size = max_size
         self.verbose = verbose
         self.stdout_method = stdout_method if verbose else FakeIo()
-        self.stdout_fmt = stdout_fmt
-        self.saver = Saver(verbose, stdout_method, **saver_kwargs)
-        self.loader = Loader(verbose, stdout_method, **loader_kwargs)
-
-    def __call__(self, *args, **kwargs):
-        return self.cache_one(*args, **kwargs)
+        self.saver = Saver(verbose, stdout_method, stdout_fmt=self.cache_stdout_fmt)
+        self.loader = Loader(verbose, stdout_method, stdout_fmt=self.get_stdout_fmt)
 
     def get_fn(self, obj=None, _id=None, file_name=None, file_stem=None):
         if _id is not None:
@@ -519,20 +567,20 @@ class FileCacher:
         elif file_name is not None:
             file_name = file_name
         elif file_stem is not None:
-            file_name = file_stem + auto_suffix(obj)
+            file_name = str(file_stem) + auto_suffix(obj)
         else:
             file_name = str(uuid.uuid4()) + auto_suffix(obj)
 
         return file_name
 
-    def cache_one(self, obj, _id=None, file_name=None, file_stem=None):
+    def cache_one(self, obj, _id=None, file_name=None, file_stem=None, **kwargs):
         file_name = self.get_fn(obj, _id, file_name, file_stem)
         path = f'{self.cache_dir}/{file_name}'
         self.delete_over_range(suffix=Path(path).suffix)
         self.saver.auto_save(obj, path)
         return file_name
 
-    def cache_batch(self, objs, _ids=None, file_names=None, file_stems=None):
+    def cache_batch(self, objs, _ids=None, file_names=None, file_stems=None, **kwargs):
         _ids = _ids or [None] * len(objs)
         file_names = file_names or [None] * len(objs)
         file_stems = file_stems or [None] * len(objs)
@@ -545,7 +593,7 @@ class FileCacher:
             _fns.append(file_name)
         return _fns
 
-    def delete_over_range(self, suffix=''):
+    def delete_over_range(self, suffix='', **kwargs):
         if not self.max_size:
             return
 
@@ -557,7 +605,7 @@ class FileCacher:
                 min_ctime = min(ctime)
                 old_path = caches[ctime.index(min_ctime)]
                 os.remove(old_path)
-                self.stdout_method(self.stdout_fmt % old_path)
+                self.stdout_method(self.delete_stdout_fmt % old_path)
                 return old_path
 
             except FileNotFoundError:
@@ -565,7 +613,7 @@ class FileCacher:
                 self.stdout_method('Two process thread were crashed while deleting file possibly')
                 return
 
-    def get_one(self, _id=None, file_name=None):
+    def get_one(self, _id=None, file_name=None, **kwargs):
         file_name = _id or file_name
 
         if file_name is None:
@@ -576,7 +624,7 @@ class FileCacher:
 
         return self.loader.auto_load(path)
 
-    def get_batch(self, _ids=None, file_names=None, size=None):
+    def get_batch(self, _ids=None, file_names=None, size=None, **kwargs):
         if _ids is None and file_names is None:
             caches = [str(_) for _ in self.cache_dir.glob(f'*')]
             paths = np.random.choice(caches, size, replace=False)
@@ -587,9 +635,9 @@ class FileCacher:
         return [self.loader.auto_load(path) for path in paths]
 
 
-class MongoDBCacher:
+class MongoDBCacher(BaseCacher):
     def __init__(self, host='127.0.0.1', port=27017, user=None, password=None, database=None, collection=None,
-                 max_size=None, verbose=True, stdout_method=print, stdout_fmt='Save _id[%s] successful!',
+                 max_size=None, verbose=True, stdout_method=print,
                  **mongo_kwargs):
         from pymongo import MongoClient
 
@@ -600,12 +648,8 @@ class MongoDBCacher:
         self.max_size = max_size
         self.verbose = verbose
         self.stdout_method = stdout_method if verbose else FakeIo()
-        self.stdout_fmt = stdout_fmt
 
-    def __call__(self, *args, **kwargs):
-        return self.cache_one(*args, **kwargs)
-
-    def cache_one(self, obj: dict, _id=None):
+    def cache_one(self, obj: dict, _id=None, **kwargs):
         self.delete_over_range()
 
         obj.setdefault('update_time', int(time.time()))
@@ -616,10 +660,10 @@ class MongoDBCacher:
         else:
             self.collection.update_one({'_id': _id}, {'$set': obj}, upsert=True)
 
-        self.stdout_method(self.stdout_fmt % _id)
+        self.stdout_method(self.cache_stdout_fmt % _id)
         return _id
 
-    def cache_batch(self, objs, _ids=None):
+    def cache_batch(self, objs, _ids=None, **kwargs):
         self.delete_over_range(len(objs))
         if _ids is None:
             x = self.collection.insert_many(objs)
@@ -631,7 +675,7 @@ class MongoDBCacher:
 
         return _ids
 
-    def delete_over_range(self, batch_size=1):
+    def delete_over_range(self, batch_size=1, **kwargs):
         if not self.max_size:
             return
 
@@ -640,22 +684,22 @@ class MongoDBCacher:
             x = query.sort({'update_time': 1}).limit(1)
             self.collection.delete_one(x)
 
-    def get_one(self, _id=None):
+    def get_one(self, _id=None, **kwargs):
         if _id is None:
             return self.collection.find_one()
         else:
             return self.collection.find_one({'_id': _id})
 
-    def get_batch(self, _ids=None, size=None):
+    def get_batch(self, _ids=None, size=None, **kwargs):
         if _ids is None:
             return [self.collection.find_one() for _ in range(size)]
         else:
             return [self.collection.find_one({'_id': _id}) for _id in _ids]
 
 
-class RedisCacher:
+class RedisCacher(BaseCacher):
     def __init__(self, host='127.0.0.1', port=6379, db=0,
-                 max_size=None, verbose=True, stdout_method=print, stdout_fmt='Save _id[%s] successful!',
+                 max_size=None, verbose=True, stdout_method=print,
                  **mongo_kwargs) -> None:
         import redis
 
@@ -663,12 +707,8 @@ class RedisCacher:
         self.max_size = max_size
         self.verbose = verbose
         self.stdout_method = stdout_method if verbose else FakeIo()
-        self.stdout_fmt = stdout_fmt
 
-    def __call__(self, *args, **kwargs):
-        return self.cache_one(*args, **kwargs)
-
-    def cache_one(self, obj: dict, _id=None):
+    def cache_one(self, obj: dict, _id=None, **kwargs):
         self.delete_over_range()
 
         s = int(time.time())
@@ -677,10 +717,10 @@ class RedisCacher:
             _id = s
 
         self.client.hmset(_id, obj)
-        self.stdout_method(self.stdout_fmt % _id)
+        self.stdout_method(self.cache_stdout_fmt % _id)
         return _id
 
-    def cache_batch(self, objs, _ids=None):
+    def cache_batch(self, objs, _ids=None, **kwargs):
         self.delete_over_range(len(objs))
         s = int(time.time())
         _ids = _ids or [f'{s}_{i}' for i in range(len(objs))]
@@ -688,11 +728,11 @@ class RedisCacher:
         for _id, obj in zip(_ids, objs):
             obj.setdefault('update_time', s)
             self.client.hmset(_id, obj)
-            self.stdout_method(self.stdout_fmt % _id)
+            self.stdout_method(self.cache_stdout_fmt % _id)
 
         return _ids
 
-    def delete_over_range(self, batch_size=1):
+    def delete_over_range(self, batch_size=1, **kwargs):
         if not self.max_size:
             return
 
@@ -700,12 +740,12 @@ class RedisCacher:
             raise NotImplementedError
             self.client.delete()
 
-    def get_one(self, _id=None):
+    def get_one(self, _id=None, **kwargs):
         if _id is None:
             _id = self.client.randomkey()
         return self.client.hgetall(_id)
 
-    def get_batch(self, _ids=None, size=None):
+    def get_batch(self, _ids=None, size=None, **kwargs):
         rets = []
         if _ids is None:
             _ids = [self.client.randomkey() for _ in range(size)]
@@ -714,11 +754,11 @@ class RedisCacher:
         return rets
 
 
-class ESCacher:
+class ESCacher(BaseCacher):
     """todo"""
 
 
-class PGSQLCacher:
+class PGSQLCacher(BaseCacher):
     """todo"""
 
 
