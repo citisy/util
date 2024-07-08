@@ -29,6 +29,7 @@ def mk_parent_dir(file_path):
 
 suffixes_dict = dict(
     json=('.json', '.js'),
+    jsonl=('.jsonl', '.jsl'),
     yml=('.yml', '.yaml'),
     ini=('.ini',),
     txt=('.txt',),
@@ -67,6 +68,7 @@ class Saver:
 
         self.funcs = {
             suffixes_dict['json']: self.save_json,
+            suffixes_dict['jsonl']: self.save_jsonl,
             suffixes_dict['yml']: self.save_yml,
             suffixes_dict['ini']: self.save_ini,
             suffixes_dict['txt']: self.save_txt,
@@ -95,9 +97,16 @@ class Saver:
             self.save_bytes(obj, path, **kwargs)
 
     def save_json(self, obj: dict, path, **kwargs):
+        kwargs.setdefault('ensure_ascii', False)
+        kwargs.setdefault('indent', 4)
         with open(path, 'w', encoding='utf8', errors='ignore') as f:
-            json.dump(obj, f, ensure_ascii=False, indent=4, **kwargs)
+            json.dump(obj, f, **kwargs)
 
+        self.stdout(path)
+
+    def save_jsonl(self, obj: List[dict], path, **kwargs):
+        obj = [json.dumps(o, ensure_ascii=False) for o in obj]
+        self.save_txt(obj, path, **kwargs)
         self.stdout(path)
 
     def save_yml(self, obj: dict, path, **kwargs):
@@ -248,6 +257,7 @@ class Loader:
 
         self.funcs = {
             suffixes_dict['json']: self.load_json,
+            suffixes_dict['jsonl']: self.load_jsonl,
             suffixes_dict['yml']: self.load_yaml,
             suffixes_dict['ini']: self.load_ini,
             suffixes_dict['txt']: self.load_txt,
@@ -274,6 +284,14 @@ class Loader:
     def load_json(self, path) -> dict:
         with open(path, 'r', encoding='utf8', errors='ignore') as f:
             obj = json.load(f)
+        self.stdout(path)
+
+        return obj
+
+    def load_jsonl(self, path) -> List[dict]:
+        obj = self.load_txt(path)
+        obj = [json.loads(o) for o in obj]
+
         self.stdout(path)
 
         return obj
