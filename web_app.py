@@ -22,7 +22,7 @@ class FastapiOp:
 
         for path1, cfg in configs.items():
             sub_app = cls.create_sub_app()
-            for path2, router_kwargs in path1.items():
+            for path2, router_kwargs in cfg.items():
                 cls.register_post_router(sub_app, path2, **router_kwargs)
 
             app.include_router(sub_app, prefix=path1)
@@ -45,7 +45,7 @@ class FastapiOp:
     def register_post_router(
             app: 'FastAPI' or 'APIRouter',
             path,
-            model,
+            func,
             request_template: 'pydantic.BaseModel()' = None,
             response_template: 'pydantic.BaseModel()' = None,
             **post_kwargs
@@ -57,7 +57,7 @@ class FastapiOp:
         def post(data: request_template):
             if isinstance(data, pydantic.BaseModel):
                 data = data.dict()
-            ret = model(data, **post_kwargs)
+            ret = func(data, **post_kwargs)
             return ret
 
 
@@ -80,7 +80,7 @@ class FlaskOp:
 
         for path1, cfg in configs.items():
             sub_app = cls.create_sub_app(path1)
-            for path2, router_kwargs in path1.items():
+            for path2, router_kwargs in cfg.items():
                 cls.register_post_router(sub_app, path2, **router_kwargs)
 
             app.register_blueprint(sub_app, url_prefix=path1)
@@ -103,7 +103,7 @@ class FlaskOp:
     def register_post_router(
             app: 'Flask' or 'Blueprint',
             path,
-            model,
+            func,
             request_template: 'pydantic.BaseModel()' = None,
             response_template: 'pydantic.BaseModel()' = None,
             **post_kwargs
@@ -118,7 +118,7 @@ class FlaskOp:
                 data = request_template(**data)
                 data = data.dict()
 
-            ret = model(data, **post_kwargs)
+            ret = func(data, **post_kwargs)
 
             if response_template:
                 ret = response_template(**ret)
