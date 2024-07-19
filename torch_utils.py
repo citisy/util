@@ -236,19 +236,23 @@ class ModuleManager:
         return obj
 
     @staticmethod
-    def assign_device_run(module: nn.Module, call_func, device, *args, **kwargs):
+    def assign_device_run(module: nn.Module, call_func, device, *args, force_effect_module=True, **kwargs):
         """let module run in the assigned device"""
-        module.to(device)
+        if force_effect_module:
+            module.to(device)
+
         args = [obj.to(device) if isinstance(obj, torch.Tensor) else obj for obj in args]
         kwargs = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in kwargs.items()}
 
         return call_func(*args, **kwargs)
 
     @staticmethod
-    def assign_dtype_run(module: nn.Module, call_func, dtype, *args, **kwargs):
+    def assign_dtype_run(module: nn.Module, call_func, dtype, *args, force_effect_module=True, **kwargs):
         """let module run in the assigned dtype"""
+        if force_effect_module:
+            module.to(dtype)
+
         check = lambda obj: isinstance(obj, torch.Tensor) and obj.dtype.is_floating_point == dtype.is_floating_point
-        module.to(dtype)
         args = [obj.to(dtype) if check(obj) else obj for obj in args]
         kwargs = {k: v.to(dtype) if check(v) else v for k, v in kwargs.items()}
 
@@ -440,6 +444,12 @@ class WeightsFormats:
 
 class Export:
     @staticmethod
+    def to_safetensors(state_dict, f, **export_kwargs):
+        from safetensors.torch import save_file
+
+        save_file(state_dict, f, **export_kwargs)
+
+    @staticmethod
     def to_torchscript(model, *trace_input, **export_kwargs):
         """note that, dynamic python script change to static c++ script, according to trace the code
         so, such as `if...else...`, 'for...in...`, etc., if trace in a dynamic variable,
@@ -474,7 +484,7 @@ class Load:
         load_dict = {
             'PyTorch': cls.from_ckpt,
             'TorchScript': cls.from_jit,
-            'Safetensors': cls.from_save_tensor
+            'Safetensors': cls.from_safetensors
         }
         k = WeightsFormats.get_format_from_suffix(save_path)
         return load_dict.get(k)(save_path, **kwargs)
@@ -497,13 +507,16 @@ class Load:
         return tensors
 
     @staticmethod
-    def from_save_tensor(save_path, **kwargs):
+    def from_safetensors(save_path, return_metadata=False, **kwargs):
         from safetensors import safe_open
 
         tensors = OrderedDict()
         with safe_open(save_path, framework="pt", **kwargs) as f:
             for k in f.keys():
                 tensors[k] = f.get_tensor(k)
+
+            if return_metadata:
+                tensors['__metadata__'] = f.metadata()
 
         return tensors
 
