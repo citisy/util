@@ -1,5 +1,5 @@
 import numpy as np
-from tritonclient.http import InferenceServerClient, InferInput, InferRequestedOutput, InferAsyncRequest
+from tritonclient.http import InferenceServerClient, InferInput, InferRequestedOutput, InferAsyncRequest    # pip install tritonclient[all]
 from .log_utils import get_logger
 
 # https://docs.nvidia.com/deeplearning/triton-inference-server/user-guide/docs/user_guide/model_configuration.html#datatypes
@@ -15,7 +15,7 @@ datatypes = {
 
 
 class Requests:
-    def __init__(self, url, verbose=False, logger=None, **kwargs):
+    def __init__(self, url='127.0.0.1:8000', verbose=False, logger=None, **kwargs):
         self.client = InferenceServerClient(url=url, verbose=False, **kwargs)
         self.verbose = verbose
         self.logger = get_logger(logger)

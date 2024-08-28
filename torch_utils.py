@@ -840,10 +840,10 @@ def make_optimizer_cls(optimizer_type: str):
 
     elif optimizer_type in {
         'AdamW8bit', 'SGDNesterov8bit', 'Lion8bit', 'PagedAdamW8bit', 'PagedLion8bit',
-        'PagedAdamW', 'PagedAdamW32bit', ''
+        'PagedAdamW', 'PagedAdamW32bit'
     }:
         import bitsandbytes as bnb
-        return getattr(bnb, optimizer_type)
+        return getattr(bnb.optim, optimizer_type)
 
     elif optimizer_type in {'DAdaptAdaGrad', 'DAdaptAdam', 'DAdaptAdan', 'DAdaptLion', 'DAdaptSGD'}:
         import dadaptation
