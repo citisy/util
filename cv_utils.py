@@ -1,7 +1,5 @@
 import cv2
 import numpy as np
-from collections import Counter
-from typing import Callable
 
 
 class CoordinateConvert:
@@ -238,6 +236,13 @@ def detect_continuous_areas(image, x_tol=20, y_tol=20, region_thres=0, binary_th
 
 
 class PixBox:
+    """Some definition:
+    pixel: pixel mask of an image
+        2-d array with shape of (h, w)
+    bboxes: bounding boxes of objections
+        2-d array with shape of (n, 4), 4 gives (x1, y1, x2, y2)
+    """
+
     @staticmethod
     def close(image, k_size=8):
         k = np.ones((k_size, k_size), np.uint8)
@@ -249,11 +254,11 @@ class PixBox:
         return cv2.morphologyEx(image, cv2.MORPH_OPEN, k)
 
     @staticmethod
-    def pixel_to_box(pix_image, ignore_class, min_area=400, convert_func=None):
+    def pixel_to_bboxes(pixel, ignore_class, min_area=400, convert_func=None):
         """generate detection bboxes from pixel image
 
         Args:
-            pix_image: 2-d array
+            pixel:
             min_area:
             ignore_class (list): usually background class
             convert_func: function to convert the mask
@@ -261,7 +266,7 @@ class PixBox:
         Returns:
 
         """
-        unique_classes = np.unique(pix_image)
+        unique_classes = np.unique(pixel)
         bboxes = []
         classes = []
 
@@ -269,7 +274,7 @@ class PixBox:
             if c in ignore_class:
                 continue
 
-            mask = (pix_image == c).astype(np.uint8)
+            mask = (pixel == c).astype(np.uint8)
             if convert_func:
                 mask = convert_func(mask)
 
@@ -287,11 +292,11 @@ class PixBox:
         return bboxes, classes
 
     @staticmethod
-    def batch_pixel_to_box(pix_images, thres=0.5, min_area=400, ignore_class=None, convert_func=None):
+    def batch_pixel_to_bboxes(batch_pixel, thres=0.5, min_area=400, ignore_class=None, convert_func=None):
         """generate detection bboxes from pixel images
 
         Args:
-            pix_images: 3-d array, (h, w, c), c gives the classes
+            batch_pixel: 3-d array, (h, w, c), c gives the classes
             thres:
             min_area:
             ignore_class:
@@ -300,7 +305,7 @@ class PixBox:
         Returns:
 
         """
-        num_class = pix_images.shape[2]
+        num_class = batch_pixel.shape[2]
         bboxes = []
         classes = []
 
@@ -308,7 +313,7 @@ class PixBox:
             if c in ignore_class:
                 continue
 
-            mask = (pix_images[c] > thres).astype(np.uint8)
+            mask = (batch_pixel[c] > thres).astype(np.uint8)
             if convert_func:
                 mask = convert_func(mask)
 
@@ -323,7 +328,7 @@ class PixBox:
         return bboxes, classes
 
     @staticmethod
-    def box_to_pixel(images, bboxes, classes, add_edge=False):
+    def bboxes_to_pixel(images, bboxes, classes, add_edge=False):
         """generate pixel area from image with detection bboxes
 
         Args:
@@ -336,21 +341,21 @@ class PixBox:
 
         """
         h, w = images.shape[:2]
-        pix_image = np.zeros((h, w), dtype=images.dtype)
+        pixel = np.zeros((h, w), dtype=images.dtype)
 
         for box, cls in zip(bboxes, classes):
             x1, y1, x2, y2 = box
-            pix_image[y1:y2, x1:x2] = cls
+            pixel[y1:y2, x1:x2] = cls
 
         if add_edge:
             for box, cls in zip(bboxes, classes):
                 x1, y1, x2, y2 = box
-                pix_image[y1:y2, x1 - 1 if x1 > 0 else x1] = 255
-                pix_image[y1:y2, x2 + 1 if x2 < w else x2] = 255
-                pix_image[y1 - 1 if y1 > 0 else y1, x1:x2] = 255
-                pix_image[y2 + 1 if y2 < h else y2, x1:x2] = 255
+                pixel[y1:y2, x1 - 1 if x1 > 0 else x1] = 255
+                pixel[y1:y2, x2 + 1 if x2 < w else x2] = 255
+                pixel[y1 - 1 if y1 > 0 else y1, x1:x2] = 255
+                pixel[y2 + 1 if y2 < h else y2, x1:x2] = 255
 
-        return pix_image
+        return pixel
 
 
 def fragment_image(image: np.ndarray,
@@ -522,107 +527,11 @@ def non_max_suppression(boxes, conf, iou_method, threshold=0.6):
     return keep
 
 
-def grid_lines_to_cells(cols, rows, w, h):
-    """cells created by given grid lines
-
-    Args:
-        cols: (nx, )
-        rows: (ny, )
-        w: width of grid
-        h: height of grid
-
-    Returns:
-        cells: 2-D array(nx+1, ny+1)
-    """
-    cols = np.sort(cols)
-    col1 = np.r_[0, cols]
-    col2 = np.r_[cols, w]
-
-    rows = np.sort(rows)
-    row1 = np.r_[0, rows]
-    row2 = np.r_[rows, h]
-
-    grid1 = np.meshgrid(col1, row1)
-    grid2 = np.meshgrid(col2, row2)
-
-    grid = np.stack(grid1 + grid2)
-    grid = np.transpose(grid, (1, 2, 0))
-    cells = np.reshape(grid, (-1, 4))
-    return cells
-
-
-def box_inside_grid_cells(bboxes, cells):
-    """distinguish the bboxes belonged to the given grid cells
-
-    Args:
-        bboxes: (m, 4)
-        cells: (n, 4)
-
-    Returns:
-        arg: 1-D array(m, ), m for the index of bboxes, the value for the index of cells
-    """
-    from metrics.object_detection import Iou
-    iou = Iou().u_iou(cells, bboxes)
-    arg = np.argmax(iou, axis=1)
-    return arg
-
-
-def box_inside_grid_lines(bboxes, cols, rows, w, h):
-    """distinguish the bboxes belonged to the given grid lines
-
-    Args:
-        bboxes: (m, 4)
-        cols: (nx, 2)
-        rows: (ny, 2)
-        w:
-        h:
-
-    Returns:
-
-    """
-    cells = grid_lines_to_cells(cols, rows, w, h)
-    return box_inside_grid_cells(bboxes, cells)
-
-
-def box_include_grid_cells(bboxes, cells, iou_thres=0.1):
-    """distinguish the bboxes included in given grid cells
-
-    Args:
-        bboxes: (m, 4)
-        cells: (n, 4)
-        iou_thres:
-
-    Returns:
-        arg: 2-D array(m, n),m for index of bboxes, n for the index of cells
-    """
-    from metrics.object_detection import Iou
-    iou = Iou().u_iou(cells, bboxes)
-    arg = iou > iou_thres
-    return arg
-
-
-def box_include_grid_lines(bboxes, cols, rows, w, h):
-    """distinguish the bboxes included in given grid lines
-
-    Args:
-        bboxes:
-        cols:
-        rows:
-        w:
-        h:
-
-    Returns:
-
-    """
-    cells = grid_lines_to_cells(cols, rows, w, h)
-    return box_include_grid_cells(bboxes, cells)
-
-
-def lines_to_boxes(lines, oblique=True):
+def lines_to_bboxes(lines, oblique=True):
     """bboxes created by given lines
 
     Args:
-        lines: (n, 4), 4 for (x1, y1, x2, y2)
+        lines: 2-d array with shape of (n, 4), 4 gives (x1, y1, x2, y2)
         oblique:
             False, all lines perpendicular to axis
             True, any directional lines
@@ -683,3 +592,119 @@ def lines_to_boxes(lines, oblique=True):
     bboxes = CoordinateConvert.rect2box(rect)
 
     return bboxes
+
+
+class GridBox:
+    """Some definition:
+    grids: divide an image into nx*ny pieces
+        always with property of (edges(l, r, t, d), n_grids(n_grid_x, n_grid_y))
+    lines: lines of grids
+        2-d array with shape of ((nx+1)*(ny+1), 4), 4 gives (x1, y1, x2, y2)
+    cols: cols of grid lines
+        1-d array with shape of (nx+1, ), gives the y-axis
+    rows: rows of grid lines
+        1-d array with shape of (ny+1, ), gives the x-axis
+    points: intersection points of grids lines
+        ((nx+1)*(ny+1), 2), 2 gives (x, y)
+    cells: bounding boxes of grids
+        2-d array with shape of (nx*ny, 4), 4 gives (x1, y1, x2, y2)
+    bboxes: bounding boxes of objections
+        2-d array with shape of (m, 4), 4 gives (x1, y1, x2, y2)
+    """
+
+    @staticmethod
+    def grids_to_lines(edges, n_grids):
+        l, r, t, d = edges
+        n_grid_x, n_grid_y = n_grids
+        cols = np.linspace(l, r, n_grid_x + 1)
+        rows = np.linspace(t, d, n_grid_y + 1)
+        return cols, rows
+
+    @classmethod
+    def grids_to_points(cls, edges, n_grids):
+        n_grid_x, n_grid_y = n_grids
+
+        cols, rows = cls.grids_to_lines(edges, n_grids)
+
+        points_x = np.tile(cols[None, :], (n_grid_x + 1, 1))
+        points_y = np.tile(rows[:, None], (1, n_grid_y + 1))
+
+        points = np.stack([points_x, points_y], axis=-1).reshape(-1, 2)
+
+        return points
+
+    @classmethod
+    def grids_to_cells(cls, edges, n_grids):
+        cols, rows = cls.grids_to_lines(edges, n_grids)
+        cells = cls.lines_to_cells(cols, rows)
+        return cells
+
+    @staticmethod
+    def lines_to_points():
+        raise NotImplemented
+
+    @staticmethod
+    def points_to_lines():
+        raise NotImplemented
+
+    @staticmethod
+    def lines_to_cells(cols, rows):
+        """cells created by given grid lines"""
+        cols = np.sort(cols)
+        col1 = cols[:-1]
+        col2 = cols[1:]
+
+        rows = np.sort(rows)
+        row1 = rows[:-1]
+        row2 = rows[1:]
+
+        grid1 = np.meshgrid(col1, row1)
+        grid2 = np.meshgrid(col2, row2)
+
+        grid = np.stack(grid1 + grid2)
+        grid = np.transpose(grid, (1, 2, 0))
+        cells = np.reshape(grid, (-1, 4))
+        return cells
+
+    @staticmethod
+    def bboxes_inside_cells(bboxes, cells):
+        """distinguish the bboxes belonged to(completely included in) the given grid cells
+
+        Returns:
+            arg: 1-D array(m, ), m for the index of bboxes, the value for the index of cells
+        """
+        from metrics.object_detection import Iou
+        iou = Iou().u_iou(cells, bboxes)
+        arg = np.argmax(iou, axis=1)
+        return arg
+
+    @classmethod
+    def bboxes_inside_lines(cls, bboxes, cols, rows):
+        """distinguish the bboxes belonged to(completely included in) the given grid lines
+        """
+        cells = cls.lines_to_cells(cols, rows)
+        return cls.bboxes_inside_cells(bboxes, cells)
+
+    @staticmethod
+    def bboxes_include_cells(bboxes, cells, iou_thres=0.1):
+        """distinguish the bboxes included in given grid cells
+
+        Args:
+            bboxes:
+            cells:
+            iou_thres:
+
+        Returns:
+            arg: 2-D array(m, n),m for index of bboxes, n for the index of cells
+        """
+        from metrics.object_detection import Iou
+        iou = Iou().u_iou(cells, bboxes)
+        arg = iou > iou_thres
+        return arg
+
+    @classmethod
+    def bboxes_include_lines(cls, bboxes, cols, rows):
+        """distinguish the bboxes included in given grid lines
+        """
+        cells = cls.lines_to_cells(cols, rows)
+        return cls.bboxes_include_cells(bboxes, cells)
