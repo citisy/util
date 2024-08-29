@@ -235,10 +235,14 @@ def detect_continuous_areas(image, x_tol=20, y_tol=20, region_thres=0, binary_th
     return bboxes
 
 
-class PixBox:
+class MaskBox:
     """Some definition:
-    pixel: pixel mask of an image
-        2-d array with shape of (h, w)
+    mask: grey image
+        2-d array with shape of (h, w), falls in [0, 255]
+    masks: grey images
+        3-d array with shape of (c, h, w), falls in [0, 255], c gives the classes
+    label_mask: label image
+        2-d array with shape of (h, w), falls in [0, +inf)
     bboxes: bounding boxes of objections
         2-d array with shape of (n, 4), 4 gives (x1, y1, x2, y2)
     """
@@ -254,11 +258,11 @@ class PixBox:
         return cv2.morphologyEx(image, cv2.MORPH_OPEN, k)
 
     @staticmethod
-    def pixel_to_bboxes(pixel, ignore_class, min_area=400, convert_func=None):
-        """generate detection bboxes from pixel image
+    def label_mask_to_bboxes(label_mask, ignore_class=(), min_area=400, convert_func=None):
+        """generate detection bboxes from label mask
 
         Args:
-            pixel:
+            label_mask:
             min_area:
             ignore_class (list): usually background class
             convert_func: function to convert the mask
@@ -266,7 +270,7 @@ class PixBox:
         Returns:
 
         """
-        unique_classes = np.unique(pixel)
+        unique_classes = np.unique(label_mask)
         bboxes = []
         classes = []
 
@@ -274,7 +278,7 @@ class PixBox:
             if c in ignore_class:
                 continue
 
-            mask = (pixel == c).astype(np.uint8)
+            mask = (label_mask == c).astype(np.uint8)
             if convert_func:
                 mask = convert_func(mask)
 
@@ -292,20 +296,20 @@ class PixBox:
         return bboxes, classes
 
     @staticmethod
-    def batch_pixel_to_bboxes(batch_pixel, thres=0.5, min_area=400, ignore_class=None, convert_func=None):
-        """generate detection bboxes from pixel images
+    def masks_to_bboxes(masks, thres=0.5, min_area=400, ignore_class=(), convert_func=None):
+        """generate detection bboxes from masks
 
         Args:
-            batch_pixel: 3-d array, (h, w, c), c gives the classes
+            masks:
             thres:
             min_area:
-            ignore_class:
+            ignore_class: usually background class
             convert_func: function to convert the mask
 
         Returns:
 
         """
-        num_class = batch_pixel.shape[2]
+        num_class = masks.shape[0]
         bboxes = []
         classes = []
 
@@ -313,7 +317,7 @@ class PixBox:
             if c in ignore_class:
                 continue
 
-            mask = (batch_pixel[c] > thres).astype(np.uint8)
+            mask = (masks[c] > thres).astype(np.uint8)
             if convert_func:
                 mask = convert_func(mask)
 
@@ -328,11 +332,11 @@ class PixBox:
         return bboxes, classes
 
     @staticmethod
-    def bboxes_to_pixel(images, bboxes, classes, add_edge=False):
-        """generate pixel area from image with detection bboxes
+    def bboxes_to_mask(image, bboxes, classes, add_edge=False):
+        """generate mask from image with detection bboxes
 
         Args:
-            images:
+            image:
             bboxes:
             classes:
             add_edge:
@@ -340,22 +344,22 @@ class PixBox:
         Returns:
 
         """
-        h, w = images.shape[:2]
-        pixel = np.zeros((h, w), dtype=images.dtype)
+        h, w = image.shape[:2]
+        mask = np.zeros((h, w), dtype=image.dtype)
 
         for box, cls in zip(bboxes, classes):
             x1, y1, x2, y2 = box
-            pixel[y1:y2, x1:x2] = cls
+            mask[y1:y2, x1:x2] = cls
 
         if add_edge:
             for box, cls in zip(bboxes, classes):
                 x1, y1, x2, y2 = box
-                pixel[y1:y2, x1 - 1 if x1 > 0 else x1] = 255
-                pixel[y1:y2, x2 + 1 if x2 < w else x2] = 255
-                pixel[y1 - 1 if y1 > 0 else y1, x1:x2] = 255
-                pixel[y2 + 1 if y2 < h else y2, x1:x2] = 255
+                mask[y1:y2, x1 - 1 if x1 > 0 else x1] = 255
+                mask[y1:y2, x2 + 1 if x2 < w else x2] = 255
+                mask[y1 - 1 if y1 > 0 else y1, x1:x2] = 255
+                mask[y2 + 1 if y2 < h else y2, x1:x2] = 255
 
-        return pixel
+        return mask
 
 
 def fragment_image(image: np.ndarray,
