@@ -1,9 +1,11 @@
+import inspect
 import re
+from typing import List
+
 import cv2
 import numpy as np
-import inspect
 from PIL import ImageFont, ImageDraw, Image
-from typing import List
+
 from .excluded.cmap import cmap, terminal_cmap
 
 cmap_list = list(cmap.keys())
@@ -416,7 +418,7 @@ class TextVisualize:
         return cls.highlight_subtexts(text, spans, highlight_objs, **kwargs)
 
     @staticmethod
-    def num_to_human_readable_str(num: int, factor=1024., suffixes=('b', 'K', 'M', 'G', 'T')):
+    def num_to_human_readable_str(num: int, factor: float | list = 1024., suffixes=('b', 'K', 'M', 'G', 'T')):
         """
         Examples:
             >>> TextVisualize.num_to_human_readable_str(1234567)
@@ -453,3 +455,634 @@ class TextVisualize:
             else:
                 s.append(f'{k}={v}')
         return s if return_list else ','.join(s)
+
+
+NORMAL = 0
+POLAR = 1
+
+
+class Formulae2DVisualize:
+    """Visualize by mathplotlib
+    Some definition:
+        implicit formulae:
+            e.g. `f(x, y) = 0`
+        explicit formulae:
+            e.g. `y = f(x)`
+        transform formulae:
+            e.g. `x = f1(t), y = f2(t)`
+        differential formulae:
+            e.g. `dx = f_x(x, y)dt, dy = f_y(x, y)dt`
+    """
+
+    @staticmethod
+    def _vis(
+            ax, fig,
+            xlim=None, ylim=None, axis=False,
+            title='', facecolor='papayawhip',
+            save_path=None, show_fig=True,
+            **kwargs
+    ):
+        import matplotlib.pyplot as plt
+
+        xlim = xlim or ax.get_xlim()
+        ylim = ylim or ax.get_ylim()
+        ax.set_xlim(*xlim)
+        ax.set_ylim(*ylim)
+        ax.set_title(title)
+
+        if not axis:
+            ax.set_axis_off()
+
+        fig.set_facecolor(facecolor)
+        ax.set_facecolor(facecolor)
+
+        if save_path is not None:
+            plt.savefig(save_path, facecolor=fig.get_facecolor())
+
+        if show_fig:
+            plt.show()
+
+    @classmethod
+    def implicit_by_matplotlib(
+            cls,
+            func,
+            steps=2 ** 10,
+            xaxis=None, yaxis=None,
+            taxis=None, raxis=None,
+            axis_type=NORMAL,
+            **draw_kwargs
+    ):
+        """plot by method of `contour` module from matplotlib
+
+        Args:
+            func:
+            steps:
+            xaxis:
+            yaxis:
+            taxis:
+            raxis:
+            axis_type:
+            **draw_kwargs:
+
+        Returns:
+
+        Examples:
+            from numpy import exp, sin, cos
+
+            Formulae2DVisualize.implicit_by_matplotlib(
+                func=lambda x, y: exp(sin(x) + cos(y)) - sin(exp(x + y)),
+                xaxis=(-10, 10), yaxis=(-10, 10),
+                title=r'$e^{\sin (x) + \cos (y)} = \sin (e^{x + y})$',
+            )
+
+        """
+        from numpy import sin, cos
+        import matplotlib.pyplot as plt
+
+        if axis_type == POLAR:
+            xaxis, yaxis = taxis, raxis
+
+        x = np.linspace(*xaxis, steps)
+        y = np.linspace(*yaxis, steps)
+        xx, yy = np.meshgrid(x, y)
+        zz = func(xx, yy)
+
+        if axis_type == POLAR:
+            xx, yy = yy * cos(xx), yy * sin(xx)
+
+        fig = plt.figure(figsize=draw_kwargs.get('figsize', None))
+        ax = fig.add_subplot()
+        ax.contour(xx, yy, zz, 0, colors=draw_kwargs.get('color', 'r'))
+
+        cls._vis(ax, fig, **draw_kwargs)
+
+        return ax, (xx, yy, zz)
+
+    @classmethod
+    def implicit_by_sympy(
+            cls,
+            func,
+            steps=2 ** 10,
+            xaxis=None, yaxis=None,
+            taxis=None, raxis=None,
+            axis_type=NORMAL,
+            **draw_kwargs
+    ):
+        """plot by method of `plot_implicit` module from sympy
+
+        Args:
+            func:
+            steps:
+            xaxis:
+            yaxis:
+            taxis:
+            raxis:
+            axis_type:
+            **draw_kwargs:
+
+        Returns:
+
+        Examples:
+            from sympy import exp, sin, cos
+
+            Formulae2DVisualize.implicit_by_sympy(
+                func=lambda x, y: exp(sin(x) + cos(y)) - sin(exp(x + y)),
+                xaxis=(-10, 10), yaxis=(-10, 10),
+                title=r'$e^{\sin (x) + \cos (y)} = \sin (e^{x + y})$',
+            )
+        """
+        from sympy import symbols, plot_implicit
+
+        if axis_type == POLAR:
+            xaxis, yaxis = taxis, raxis
+
+        x, y = symbols('x y')
+        z = func(x, y)
+
+        p = plot_implicit(z, (x, *xaxis), (y, *yaxis),
+                          points=steps, line_color=draw_kwargs.get('color', 'r'), show=False,
+                          xlim=draw_kwargs.get('xlim', (None, None)), ylim=draw_kwargs.get('ylim', (None, None)),
+                          title=draw_kwargs.get('title', ''))
+
+        if draw_kwargs.get('save_path', None) is not None:
+            p.save(draw_kwargs.get('save_path'))
+
+        p.show()
+
+    @classmethod
+    def implicit_by_gradient(
+            cls,
+            func,
+            steps=2 ** 10,
+            xaxis=None, yaxis=None,
+            taxis=None, raxis=None,
+            axis_type=NORMAL,
+            k=1.,
+            **draw_kwargs
+    ):
+        """plot by method of gradient
+
+        Args:
+            func:
+            steps:
+            xaxis:
+            yaxis:
+            taxis:
+            raxis:
+            axis_type:
+            k:
+            **draw_kwargs:
+
+        Returns:
+
+        Examples:
+            from numpy import exp, sin, cos
+
+            Formulae2DVisualize.implicit_by_gradient(
+                func=lambda x, y: exp(sin(x) + cos(y)) - sin(exp(x + y)),
+                xaxis=(-10, 10), yaxis=(-10, 10),
+                title=r'$e^{\sin (x) + \cos (y)} = \sin (e^{x + y})$',
+            )
+        """
+        import matplotlib.pyplot as plt
+        import matplotlib.colors as colors
+
+        if axis_type == POLAR:
+            xaxis, yaxis = taxis, raxis
+
+        x = np.linspace(*xaxis, steps)
+        y = np.linspace(*yaxis, steps)
+        xx, yy = np.meshgrid(x, y)
+        zz = func(xx, yy)
+
+        grad = np.gradient(zz)
+        mold = np.sqrt(grad[0] ** 2 + grad[1] ** 2)
+        zz = np.abs(zz)
+
+        a = zz < k * mold
+        a = a[::-1, :]
+
+        fig = plt.figure(figsize=draw_kwargs.get('figsize', None))
+        ax = fig.add_subplot()
+
+        cmap = colors.ListedColormap([draw_kwargs.get('facecolor', 'papayawhip'), 'red'])
+        ax.imshow(a, cmap=cmap)
+
+        cls._vis(ax, fig, **draw_kwargs)
+        return ax, (xx, yy, zz)
+
+    @classmethod
+    def implicit_by_ms(
+            cls,
+            func,
+            steps=2 ** 10,
+            xaxis=None, yaxis=None,
+            taxis=None, raxis=None,
+            axis_type=NORMAL,
+            **draw_kwargs
+    ):
+        """plot by method of Marching squares algorithm
+
+        Args:
+            func:
+            steps:
+            xaxis:
+            yaxis:
+            taxis:
+            raxis:
+            axis_type:
+            **draw_kwargs:
+
+        Returns:
+
+        Examples:
+            from numpy import exp, sin, cos
+
+            Formulae2DVisualize.implicit_by_ms(
+                func=lambda x, y: exp(sin(x) + cos(y)) - sin(exp(x + y)),
+                xaxis=(-10, 10), yaxis=(-10, 10),
+                title=r'$e^{\sin (x) + \cos (y)} = \sin (e^{x + y})$',
+            )
+        """
+        from numpy import sin, cos
+        import matplotlib.pyplot as plt
+        import matplotlib.collections as collections
+
+        if axis_type == POLAR:
+            xaxis, yaxis = taxis, raxis
+
+        x = np.linspace(*xaxis, steps)
+        y = np.linspace(*yaxis, steps)
+        xx, yy = np.meshgrid(x, y)
+        zz = func(xx, yy)
+
+        if axis_type == POLAR:
+            x, y = y * cos(x), y * sin(x)
+
+        r = np.zeros_like(zz, dtype=int)
+        r[zz > 0] = 1
+
+        mask = np.zeros((4, r.shape[0], r.shape[1]), dtype=int)
+        mask[0], mask[1], mask[2], mask[3] = 2, 3, 4, 5
+        mask = mask * r
+
+        w = np.zeros((4, r.shape[0] - 1, r.shape[1] - 1), dtype=int)
+        w[0], w[1], w[2], w[3] = mask[0][:-1, :-1], mask[1][:-1, 1:], mask[2][1:, :-1], mask[3][:-1, :-1]
+        w[w == 0] = 1
+
+        sites = np.prod(w, axis=0)
+
+        middle_x, middle_y = (x[:-1] + x[1:]) / 2, (y[:-1] + y[1:]) / 2
+
+        site_map = {
+            2: [[0, 3]],
+            3: [[0, 1]],
+            4: [[2, 3]],
+            5: [[1, 2]],
+            6: [[1, 3]],
+            8: [[0, 2]],
+            10: [[0, 1], [2, 3]],
+            12: [[0, 3], [1, 2]],
+            15: [[0, 2]],
+            20: [[1, 3]],
+            24: [[1, 2]],
+            30: [[2, 3]],
+            40: [[0, 1]],
+            60: [[0, 3]],
+        }
+
+        lines = []
+
+        for i in range(r.shape[1] - 1):
+            for j in range(r.shape[0] - 1):
+                site = sites[j, i]
+
+                if site == 1 or site == 120:
+                    continue
+
+                point_map = [(middle_x[i], y[j]),
+                             (x[i + 1], middle_y[j]),
+                             (middle_x[i], y[j + 1]),
+                             (x[i], middle_y[j])]
+
+                points = site_map[site]
+
+                for point in points:
+                    lines.append([point_map[point[0]], point_map[point[1]]])
+
+        fig = plt.figure(figsize=draw_kwargs.get('figsize', None))
+        ax = fig.add_subplot()
+
+        lc = collections.LineCollection(lines, colors=draw_kwargs.get('color', 'r'))
+        ax.add_collection(lc, autolim=True)
+        ax.autoscale_view()
+
+        cls._vis(ax, fig, **draw_kwargs)
+        return ax, (xx, yy, zz)
+
+    @classmethod
+    def implicit_by_ti(
+            cls,
+            func,
+            steps=2 ** 10,
+            xaxis=None, yaxis=None,
+            taxis=None, raxis=None,
+            axis_type=NORMAL,
+            **draw_kwargs
+    ):
+        """plot by method of Tupper interval arithmetic"""
+        raise NotImplemented
+
+    @classmethod
+    def explicit(
+            cls,
+            func,
+            steps: int = 2 ** 10,
+            axis_type: int = NORMAL,
+            axis_list: iter = None,
+            **draw_kwargs
+    ):
+        """
+
+        Args:
+            func:
+            steps:
+            axis_type:
+            axis_list:
+            **draw_kwargs:
+
+        Returns:
+
+        Examples:
+            from numpy import sin, cos, pi
+
+            # visual a normal formulae
+            Formulae2DVisualize.explicit(
+                func=lambda x: abs(x) ** (2 / 3) + 0.9 * (3.3 - x ** 2) ** 0.5 * sin(30 * pi * x),
+                axis_list=((-3.3 ** 0.5, 3.3 ** 0.5),),
+                steps=2 ** 10,
+                title=r'$y = \sqrt[3]{x^2} + 0.9(3.3 - x^2)^{0.5} \cdot  \frac{\sin (b \pi  x)}{nb} $' + '\n' +
+                      r'$n=30$',
+                save_path='test.png',
+            )
+
+            # visual a polar formulae
+            Formulae2DVisualize.explicit(
+                func=lambda t: 1 - sin(t),
+                axis_type=POLAR,
+                axis_list=((-pi * 2, pi * 2),),
+                steps=2 ** 10,
+                title=r'$r = 1 - \sin (t)$',
+                save_path='test.png',
+            )
+
+        """
+        from numpy import sin, cos
+        import matplotlib.pyplot as plt
+
+        fig = plt.figure(figsize=draw_kwargs.get('figsize', None))
+        ax = fig.add_subplot()
+
+        xs, ys = [], []
+        for axis in axis_list:
+            x = np.linspace(*axis, steps)
+            y = func(x)
+            if axis_type == POLAR:
+                x, y = y * cos(x), y * sin(x)
+
+            xs.append(x)
+            ys.append(y)
+
+        xs = np.concatenate(xs)
+        ys = np.concatenate(ys)
+
+        ax.plot(xs, ys, c=draw_kwargs.get('color', 'r'), linewidth=draw_kwargs.get('linewidth', 2))
+        cls._vis(ax, fig, **draw_kwargs)
+        return ax, (xs, ys)
+
+    @classmethod
+    def transform(
+            cls,
+            func,
+            steps=2 ** 10,
+            taxis_list=None,
+            axis_type=NORMAL,
+            **draw_kwargs
+    ):
+        """
+
+        Args:
+            steps:
+            func:
+            taxis_list:
+            axis_type:
+            **draw_kwargs:
+
+        Returns:
+
+        Examples:
+            from numpy import sin, cos, pi, log, sqrt
+
+            Formulae2DVisualize.transform(
+                func=lambda t: (sin(t) * cos(t) * log(abs(t)),
+                                sqrt(abs(t)) * cos(t)),
+                steps=2 ** 10,
+                taxis_list=((-1, 1),),
+                title=r'$x = \sin (t) \cos (t) \ln (|t|)$' + '\n' +
+                      r'$y = \sqrt{|t|} \cos (t)$' + '\n' +
+                      r'$n-1 \leq t \leq 1$',
+            )
+        """
+        from numpy import sin, cos
+        import matplotlib.pyplot as plt
+
+        xs, ys = [], []
+        for taxis in taxis_list:
+            t = np.linspace(*taxis, steps)
+            x, y = func(t)
+            if axis_type == POLAR:
+                x, y = y * cos(x), y * sin(x)
+
+            xs.append(x)
+            ys.append(y)
+
+        xs = np.concatenate(xs)
+        ys = np.concatenate(ys)
+
+        fig = plt.figure(figsize=draw_kwargs.get('figsize', None))
+        ax = fig.add_subplot()
+
+        ax.plot(xs, ys, c=draw_kwargs.get('color', 'r'))
+        cls._vis(ax, fig, **draw_kwargs)
+        return ax, (xs, ys)
+
+    @classmethod
+    def differential(
+            cls,
+            func,
+            start_values=(0, 0),
+            steps=2 ** 10,
+            taxis_list=None,
+            **draw_kwargs
+    ):
+        """
+
+        Args:
+            func:
+            start_values:
+            steps:
+            taxis_list:
+            **draw_kwargs:
+
+        Returns:
+
+        Examples:
+            Formulae2DVisualize.differential(
+                func=lambda x, y, dt: (
+                    (-3 * y - x ** 2) * dt,
+                    (3 ** 0.5 * x - y ** 3) * dt
+                ),
+                steps=10 ** 5,
+                taxis_list=[(0, 100)],
+                start_values=(1, 1),
+            )
+
+        """
+        import matplotlib.pyplot as plt
+
+        total_steps = 0
+        ts = []
+        for taxis in taxis_list:
+            ts.append(np.linspace(*taxis, steps + 1))
+            total_steps += steps + 1
+        ts = np.concatenate(ts)
+
+        xs = np.zeros(total_steps)
+        ys = np.zeros(total_steps)
+
+        xs[0], ys[0] = start_values
+
+        for i in range(total_steps - 1):
+            x, y, t = xs[i], ys[i], ts[i]
+            dt = ts[i + 1] - t
+            dx, dy = func(x, y, dt)
+
+            xs[i + 1] = xs[i] + dx
+            ys[i + 1] = ys[i] + dy
+
+        fig = plt.figure(figsize=draw_kwargs.get('figsize', None))
+        ax = fig.add_subplot()
+        ax.plot(xs, ys, c=draw_kwargs.get('color', 'r'), linewidth=draw_kwargs.get('linewidth', 2))
+        cls._vis(ax, fig, **draw_kwargs)
+        return ax, (xs, ys)
+
+
+class Formulae3DVisualize:
+    """Visualize by mathplotlib
+    Some definition:
+        implicit formulae:
+            e.g. `f(x, y, z) = 0`
+        transform formulae:
+            e.g. `x = f1(t), y = f2(t), z = f3(t)`
+        differential formulae:
+            e.g. `dx = f1(x, y, z)dt, dy = f2(x, y, z)dt`
+    """
+
+    @classmethod
+    def implicit(cls):
+        raise NotImplemented
+
+    @classmethod
+    def transform(
+            cls,
+            func,
+            steps=2 ** 10,
+            taxis_list=None,
+            **draw_kwargs
+    ):
+        import matplotlib.pyplot as plt
+
+        xs, ys, zs = [], [], []
+        for taxis in taxis_list:
+            t = np.linspace(*taxis, steps)
+            x, y, z = func(t)
+
+            xs.append(x)
+            ys.append(y)
+            zs.append(z)
+
+        xs = np.concatenate(xs)
+        ys = np.concatenate(ys)
+        zs = np.concatenate(zs)
+
+        fig = plt.figure()
+        ax = fig.add_subplot(projection='3d')
+
+        ax.plot(xs, ys, zs, linewidth=.5)
+        Formulae2DVisualize._vis(ax, fig, **draw_kwargs)
+        return ax, (xs, ys, zs)
+
+    @classmethod
+    def differential(
+            cls,
+            func,
+            start_values=(0, 0, 0),
+            steps=2 ** 10,
+            taxis_list=None,
+            **draw_kwargs
+    ):
+        """
+
+        Args:
+            func:
+            start_values:
+            steps:
+            taxis_list:
+            **draw_kwargs:
+
+        Returns:
+
+        Examples:
+            def lorenz(x, y, z, dt, s=10, r=28, b=2.667):
+                dx = s * (y - x)
+                dy = r * x - y - x * z
+                dz = x * y - b * z
+                return dx * dt, dy * dt, dz * dt
+
+            Formulae3DVisualize.differential(
+                func=lorenz,
+                n_steps=10 ** 5,
+                start_values=(0.1, 0.1, 0.1),
+                taxis_list=[(0, 10)]
+            )
+        """
+        import matplotlib.pyplot as plt
+
+        total_steps = 0
+        ts = []
+        for taxis in taxis_list:
+            ts.append(np.linspace(*taxis, steps + 1))
+            total_steps += steps + 1
+        ts = np.concatenate(ts)
+
+        xs = np.zeros(total_steps)
+        ys = np.zeros(total_steps)
+        zs = np.zeros(total_steps)
+
+        xs[0], ys[0], zs[0] = start_values
+
+        for i in range(total_steps - 1):
+            x, y, z, t = xs[i], ys[i], zs[i], ts[i]
+            dt = ts[i + 1] - t
+            dx, dy, dz = func(x, y, z, dt)
+
+            xs[i + 1] = xs[i] + dx
+            ys[i + 1] = ys[i] + dy
+            zs[i + 1] = zs[i] + dz
+
+        fig = plt.figure()
+        ax = fig.add_subplot(projection='3d')
+
+        ax.plot(xs, ys, zs, linewidth=.5)
+        Formulae2DVisualize._vis(ax, fig, **draw_kwargs)
+        return ax, (xs, ys, zs)
