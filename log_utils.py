@@ -1,11 +1,13 @@
-import os
-import time
-import psutil
 import logging
 import logging.config
-from logging.handlers import TimedRotatingFileHandler
+import os
+import time
 from functools import wraps
-from . import os_lib, converter, configs
+from logging.handlers import TimedRotatingFileHandler
+
+import psutil
+
+from . import os_lib, configs
 
 
 class EmptyLogger:
@@ -422,7 +424,7 @@ class MemoryInfo:
         handle = pynvml.nvmlDeviceGetHandleByIndex(device)
         info = pynvml.nvmlDeviceGetMemoryInfo(handle)
         info = dict(
-            total=info.free,
+            total=info.total,
             used=info.used,
             free=info.free,
         )
@@ -430,6 +432,25 @@ class MemoryInfo:
             for k, v in info.items():
                 info[k] = cls.TextVisualize.num_to_human_readable_str(v)
 
+        return info
+
+    @staticmethod
+    def get_vram_info(device='cuda'):
+        """get gpu memory by torch using"""
+        import torch
+        stats = torch.cuda.memory_stats(device)
+        active = stats['active_bytes.all.current']
+        reserved = stats['reserved_bytes.all.current']
+        free_cuda, _ = torch.cuda.mem_get_info(torch.cuda.current_device())
+        free_torch = reserved - active
+        free_total = free_cuda + free_torch
+        info = dict(
+            reserved=reserved,
+            active=active,
+            free_cuda=free_cuda,
+            free_torch=free_torch,
+            free_total=free_total
+        )
         return info
 
     @classmethod

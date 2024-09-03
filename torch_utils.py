@@ -1,12 +1,13 @@
-import re
 import copy
 import math
-import pandas as pd
+import re
+from collections import OrderedDict
+from pathlib import Path
+
 import numpy as np
+import pandas as pd
 import torch
 from torch import nn
-from pathlib import Path
-from collections import OrderedDict
 
 
 class ModuleInfo:
@@ -257,6 +258,25 @@ class ModuleManager:
         kwargs = {k: v.to(dtype) if check(v) else v for k, v in kwargs.items()}
 
         return call_func(*args, **kwargs)
+
+    @staticmethod
+    def single_batch_run(module: nn.Module, call_func, *args, **kwargs):
+        """let module run one after another single batch"""
+        check = lambda obj: isinstance(obj, (torch.Tensor, list, tuple))
+        b = None
+        for obj in args:
+            if check(obj):
+                b = len(obj)
+                break
+
+        temp = []
+        for i in range(b):
+            tmp_args = [obj[i:i + 1] if check(obj) else obj for obj in args]
+            tmp_kwargs = {k: obj[i:i + 1] if check(obj) else obj for k, obj in kwargs.items()}
+            rets = call_func(*tmp_args, **tmp_kwargs)
+            temp.append(rets)
+
+        return torch.cat(temp)
 
     @classmethod
     def initialize_layers(cls, module, init_gain=0.02, init_type='normal'):
