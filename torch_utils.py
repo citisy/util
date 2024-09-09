@@ -351,6 +351,10 @@ class ModuleManager:
                 if new_module is None:
                     raise ValueError(f"{module} has no attribute {split}.")
                 module = new_module
+
+        else:
+            module = getattr(module, tensor_name)
+
         return module
 
     @staticmethod
@@ -853,33 +857,231 @@ class Converter:
         return d
 
 
-def make_optimizer_cls(optimizer_type: str):
-    if optimizer_type in {"Lion"}:
+def make_optimizer_cls(name: str):
+    if name in {"Lion"}:
         import lion_pytorch
-        return getattr(lion_pytorch, optimizer_type)
+        return getattr(lion_pytorch, name)
 
-    elif optimizer_type in {
+    elif name in {
         'AdamW8bit', 'SGDNesterov8bit', 'Lion8bit', 'PagedAdamW8bit', 'PagedLion8bit',
         'PagedAdamW', 'PagedAdamW32bit'
     }:
         import bitsandbytes as bnb
-        return getattr(bnb.optim, optimizer_type)
+        return getattr(bnb.optim, name)
 
-    elif optimizer_type in {'DAdaptAdaGrad', 'DAdaptAdam', 'DAdaptAdan', 'DAdaptLion', 'DAdaptSGD'}:
+    elif name in {'DAdaptAdaGrad', 'DAdaptAdam', 'DAdaptAdan', 'DAdaptLion', 'DAdaptSGD'}:
         import dadaptation
-        return getattr(dadaptation, optimizer_type)
+        return getattr(dadaptation, name)
 
-    elif optimizer_type in {'DAdaptAdamPreprint', 'DAdaptAdanIP'}:
+    elif name in {'DAdaptAdamPreprint', 'DAdaptAdanIP'}:
         from dadaptation import experimental
-        return getattr(experimental, optimizer_type)
+        return getattr(experimental, name)
 
-    elif optimizer_type in {'Prodigy'}:
+    elif name in {'Prodigy'}:
         import prodigyopt
-        return getattr(prodigyopt, optimizer_type)
+        return getattr(prodigyopt, name)
 
-    elif optimizer_type in {'SGD', 'AdamW', }:
-        return getattr(torch.optim, optimizer_type)
+    elif name in {'SGD', 'AdamW', }:
+        return getattr(torch.optim, name)
 
-    elif optimizer_type in {'Adafactor'}:
+    elif name in {'Adafactor'}:
         from transformers import optimization
-        return getattr(optimization, optimizer_type)
+        return getattr(optimization, name)
+
+    else:
+        raise ValueError(f'Do not support optimizer with name of {name}')
+
+
+class SchedulerMaker:
+    @classmethod
+    def lr_scheduler(cls, name, optimizer, last_epoch=-1, **kwargs):
+        from torch.optim.lr_scheduler import LambdaLR
+
+        lr_lambda = getattr(cls, name)(**kwargs)
+        return LambdaLR(optimizer, lr_lambda, last_epoch=last_epoch)
+
+    @staticmethod
+    def constant_lr_lambda(**kwargs):
+        """
+        Create a schedule with a constant learning rate, using the learning rate set in optimizer.
+        """
+        return lambda _: 1
+
+    @staticmethod
+    def constant_with_warmup_lr_lambda(num_warmup_steps=100, **kwargs):
+        """
+        Create a schedule with a constant learning rate preceded by a warmup period during which the learning rate
+        increases linearly between 0 and the initial lr set in the optimizer.
+        """
+        def lr_lambda(current_step: int):
+            if current_step < num_warmup_steps:
+                return float(current_step) / float(max(1.0, num_warmup_steps))
+            return 1.0
+
+        return lr_lambda
+
+    @staticmethod
+    def piecewise_constant_lr_lambda(step_rules=None, **kwargs):
+        """
+        Create a schedule with a constant learning rate, using the learning rate set in optimizer.
+
+        Args:
+            step_rules (`str`):
+                The rules for the learning rate. ex: rule_steps="1:10,0.1:20,0.01:30,0.005" it means that the learning rate
+                if multiple 1 for the first 10 steps, mutiple 0.1 for the next 20 steps, multiple 0.01 for the next 30
+                steps and multiple 0.005 for the other steps.
+
+        """
+        rules_dict = {}
+        rule_list = step_rules.split(",")
+        for rule_str in rule_list[:-1]:
+            value_str, steps_str = rule_str.split(":")
+            steps = int(steps_str)
+            value = float(value_str)
+            rules_dict[steps] = value
+        last_lr_multiple = float(rule_list[-1])
+
+        def create_rules_function(rules_dict, last_lr_multiple):
+            def rule_func(steps: int) -> float:
+                sorted_steps = sorted(rules_dict.keys())
+                for i, sorted_step in enumerate(sorted_steps):
+                    if steps < sorted_step:
+                        return rules_dict[sorted_steps[i]]
+                return last_lr_multiple
+
+            return rule_func
+
+        rules_func = create_rules_function(rules_dict, last_lr_multiple)
+
+        return rules_func
+
+    @staticmethod
+    def linear_with_warmup_lr_lambda(num_warmup_steps: int = None, num_training_steps: int = None, **kwargs):
+        """
+        Create a schedule with a learning rate that decreases linearly from the initial lr set in the optimizer to 0, after
+        a warmup period during which it increases linearly from 0 to the initial lr set in the optimizer.
+
+        Args:
+            num_warmup_steps (`int`):
+                The number of steps for the warmup phase.
+            num_training_steps (`int`):
+                The total number of training steps.
+        """
+        def lr_lambda(current_step: int):
+            if current_step < num_warmup_steps:
+                return float(current_step) / float(max(1, num_warmup_steps))
+            return max(
+                0.0, float(num_training_steps - current_step) / float(max(1, num_training_steps - num_warmup_steps))
+            )
+
+        return lr_lambda
+
+    @staticmethod
+    def cosine_lr_lambda(max_epoch=-1, lrf=0.01, **kwargs):
+        return lambda x: ((1 - math.cos(x * math.pi / max_epoch)) / 2) * (lrf - 1) + 1
+
+    @staticmethod
+    def cosine_with_warmup_lr_lambda(num_warmup_steps: int = None, num_training_steps: int = None, num_cycles: float = 0.5, **kwargs):
+        """
+        Create a schedule with a learning rate that decreases following the values of the cosine function between the
+        initial lr set in the optimizer to 0, after a warmup period during which it increases linearly between 0 and the
+        initial lr set in the optimizer.
+
+        Args:
+            num_warmup_steps (`int`):
+                The number of steps for the warmup phase.
+            num_training_steps (`int`):
+                The total number of training steps.
+            num_cycles (`float`, *optional*, defaults to 0.5):
+                The number of periods of the cosine function in a schedule (the default is to just decrease from the max
+                value to 0 following a half-cosine).
+
+        """
+        def lr_lambda(current_step):
+            if current_step < num_warmup_steps:
+                return float(current_step) / float(max(1, num_warmup_steps))
+            progress = float(current_step - num_warmup_steps) / float(max(1, num_training_steps - num_warmup_steps))
+            return max(0.0, 0.5 * (1.0 + math.cos(math.pi * float(num_cycles) * 2.0 * progress)))
+
+        return lr_lambda
+
+    @staticmethod
+    def cosine_with_hard_restarts_with_warmup_lr_lambda(num_warmup_steps: int = None, num_training_steps: int = None, num_cycles: int = 1, **kwargs):
+        """
+        Create a schedule with a learning rate that decreases following the values of the cosine function between the
+        initial lr set in the optimizer to 0, with several hard restarts, after a warmup period during which it increases
+        linearly between 0 and the initial lr set in the optimizer.
+
+        Args:
+            num_warmup_steps (`int`):
+                The number of steps for the warmup phase.
+            num_training_steps (`int`):
+                The total number of training steps.
+            num_cycles (`int`, *optional*, defaults to 1):
+                The number of hard restarts to use.
+        """
+        def lr_lambda(current_step):
+            if current_step < num_warmup_steps:
+                return float(current_step) / float(max(1, num_warmup_steps))
+            progress = float(current_step - num_warmup_steps) / float(max(1, num_training_steps - num_warmup_steps))
+            if progress >= 1.0:
+                return 0.0
+            return max(0.0, 0.5 * (1.0 + math.cos(math.pi * ((float(num_cycles) * progress) % 1.0))))
+
+        return lr_lambda
+
+    @staticmethod
+    def polynomial_decay_with_warmup_lr_lambda(
+            num_warmup_steps: int = None,
+            num_training_steps: int = None,
+            lr_init: float = None,
+            lr_end: float = 1e-7,
+            power: float = 1.0,
+            **kwargs
+    ):
+        """
+        Create a schedule with a learning rate that decreases as a polynomial decay from the initial lr set in the
+        optimizer to end lr defined by *lr_end*, after a warmup period during which it increases linearly from 0 to the
+        initial lr set in the optimizer.
+
+        Args:
+            num_warmup_steps (`int`):
+                The number of steps for the warmup phase.
+            num_training_steps (`int`):
+                The total number of training steps.
+            lr_init:
+                can get by `optimizer.defaults["lr"]`
+            lr_end (`float`, *optional*, defaults to 1e-7):
+                The end LR.
+            power (`float`, *optional*, defaults to 1.0):
+                Power factor.
+
+        Note: *power* defaults to 1.0 as in the fairseq implementation, which in turn is based on the original BERT
+        implementation at
+        https://github.com/google-research/bert/blob/f39e881b169b9d53bea03d2d341b31707a6c052b/optimization.py#L37
+        """
+        if not (lr_init > lr_end):
+            raise ValueError(f"lr_end ({lr_end}) must be be smaller than initial lr ({lr_init})")
+
+        def lr_lambda(current_step: int):
+            if current_step < num_warmup_steps:
+                return float(current_step) / float(max(1, num_warmup_steps))
+            elif current_step > num_training_steps:
+                return lr_end / lr_init  # as LambdaLR multiplies by lr_init
+            else:
+                lr_range = lr_init - lr_end
+                decay_steps = num_training_steps - num_warmup_steps
+                pct_remaining = 1 - (current_step - num_warmup_steps) / decay_steps
+                decay = lr_range * pct_remaining ** power + lr_end
+                return decay / lr_init  # as LambdaLR multiplies by lr_init
+
+        return lr_lambda
+
+    @staticmethod
+    def adafactor_scheduler(name, optimizer, **kwargs):
+        import transformers
+
+        assert isinstance(optimizer, transformers.optimization.Adafactor), "adafactor scheduler must be used with Adafactor optimizer"
+
+        initial_lr = float(name.split(":")[1])
+        return transformers.optimization.AdafactorSchedule(optimizer, initial_lr)
