@@ -1,17 +1,18 @@
-import cv2
+import configparser
 import json
 import os
 import pickle
+import random
 import time
 import uuid
-import yaml
-import configparser
-import random
+from contextlib import nullcontext
+from pathlib import Path
+from typing import List
+
+import cv2
 import numpy as np
 import pandas as pd
-from pathlib import Path
-from typing import List, Any
-from contextlib import nullcontext
+import yaml
 
 
 def mk_dir(dir_path):
@@ -56,6 +57,10 @@ def auto_suffix(obj):
     else:
         s = suffixes_dict['pkl'][0]
     return s
+
+
+def find_all_suffixes_files(root_dir, suffixes):
+    return (p for p in Path(root_dir).glob('*') if p.suffix in suffixes)
 
 
 class Saver:
@@ -309,9 +314,11 @@ class Loader:
 
         return obj
 
-    def load_txt(self, path) -> iter:
+    def load_txt(self, path, split_line=True, sep='\n') -> iter:
         with open(path, 'r', encoding='utf8', errors='ignore') as f:
-            obj = f.read().rstrip().split('\n')
+            obj = f.read().rstrip()
+            if split_line:
+                obj = obj.split(sep)
 
         self.stdout(path)
         return obj
