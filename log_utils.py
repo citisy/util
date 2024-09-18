@@ -157,7 +157,7 @@ def logger_init(log_dir=None, **custom_config):
         .. code-block:: python
 
             import logging
-            from utils.configs import logger_init
+            from utils.log_utils import logger_init
 
             # default init
             logger_init()
@@ -279,9 +279,9 @@ def logger_init(log_dir=None, **custom_config):
             }
 
         }
-        default_config = configs.merge_dict(default_config, add_config)
+        default_config = configs.ConfigObjParse.merge_dict(default_config, add_config)
 
-    default_config = configs.merge_dict(default_config, custom_config)
+    default_config = configs.ConfigObjParse.merge_dict(default_config, custom_config)
     logging.config.dictConfig(default_config)
     return default_config
 
@@ -291,7 +291,7 @@ def wandb_init(**custom_config):
     default_config = {
 
     }
-    default_config = configs.merge_dict(default_config, custom_config)
+    default_config = configs.ConfigObjParse.merge_dict(default_config, custom_config)
 
     wandb.init(project='test')
     return default_config
