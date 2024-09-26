@@ -1,5 +1,6 @@
-from typing import List
+import difflib
 import re
+from typing import List
 
 
 class Sequencer:
@@ -210,3 +211,53 @@ class PrefixTree:
                         this_dict.setdefault(self.match_token, []).append(value)
                 else:
                     this_dict[self.match_token] = True
+
+
+class CloseStr:
+    @staticmethod
+    def get_close_group(paragraphs: List[str], thers=0.8) -> List[set]:
+        s = difflib.SequenceMatcher()
+
+        _check = set()
+        group_check = []
+
+        for i in range(len(paragraphs)):
+            if i in _check:
+                continue
+
+            _group_check = set()
+
+            s.set_seq1(paragraphs[i])
+            for j in range(i + 1, len(paragraphs)):
+                if j in _check:
+                    continue
+
+                s.set_seq2(paragraphs[j])
+                if s.ratio() > thers:
+                    _check.add(j)
+                    _group_check.add(i)
+                    _group_check.add(j)
+
+            if _group_check:
+                group_check.append(_group_check)
+
+        return group_check
+
+    @classmethod
+    def filter_close(cls, paragraphs, keep='first'):
+        group_set = cls.get_close_group(paragraphs)
+        filter_idx = set()
+        for group in group_set:
+            group = list(group)
+            if keep == 'first':
+                filter_idx |= set(group[1:])
+            elif keep == 'last':
+                filter_idx |= set(group[:-1])
+            else:
+                raise ValueError('keep must be first or last')
+
+        return [paragraphs[i] for i in range(len(paragraphs)) if i not in filter_idx]
+
+    @staticmethod
+    def find_close(paragraph: str, paragraphs: List[str], **kwargs):
+        return difflib.get_close_matches(paragraph, paragraphs, **kwargs)

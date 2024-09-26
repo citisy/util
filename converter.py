@@ -63,8 +63,8 @@ class DataConvert:
         return cls.image_to_base64(obj)
 
     @staticmethod
-    def image_to_bytes(obj: np.ndarray) -> bytes:
-        return cv2.imencode('.png', obj)[1].tobytes()
+    def image_to_bytes(obj: np.ndarray, fmt='.png') -> bytes:
+        return cv2.imencode(fmt, obj)[1].tobytes()
 
     @staticmethod
     def bytes_to_image(obj: bytes) -> np.ndarray:

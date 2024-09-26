@@ -13,20 +13,24 @@ POLYGON = 1
 RECTANGLE = 2
 
 
-def get_color_array(idx):
-    color_array = list(cmap[cmap_list[idx]]['array'])
+def get_color_array(idx=None, name=None):
+    if idx is not None:
+        name = cmap_list[idx]
+
+    color_array = list(cmap[name]['array'])
     color_array[0], color_array[2] = color_array[2], color_array[0]  # rgb to bgr
     return tuple(color_array)
 
 
 class ImageVisualize:
     @staticmethod
-    def box(img, boxes, visual_type=RECTANGLE, colors=None, line_thickness=None):
-        """目标框
+    def box(img, boxes, visual_type=RECTANGLE, colors=None, line_thickness=None, inplace=False):
+        """only bbox
         boxes: polygon: (-1, -1, 2) or rectangle: (-1, 4)
         colors: (-1, 3) or (-1, 1)
         """
-        img = img.copy()
+        if not inplace:
+            img = img.copy()
         colors = colors or [get_color_array(0)] * len(boxes)
         line_thickness = line_thickness or round(0.001 * (img.shape[0] + img.shape[1]) / 2) + 1  # line/font thickness
 
@@ -47,7 +51,7 @@ class ImageVisualize:
 
     @staticmethod
     def text_box(img, text_boxes, texts, scores=None, drop_score=0.5, colors=None, font_path="utils/excluded/simfang.ttf"):
-        """目标框 + 文本
+        """bbox + text, text needs the text area
         use PIL.Image instead of opencv for better chinese font support
         text_boxes: (-1, -1, 2)
         """
@@ -106,7 +110,7 @@ class ImageVisualize:
 
     @staticmethod
     def text(img, text_boxes, texts, scores=None, drop_score=0.5, font_path="utils/excluded/simfang.ttf"):
-        """文本
+        """only text, need text area
         use PIL.Image instead of opencv for better chinese font support
         text_boxes: (-1, 4, 2)
         """
@@ -151,38 +155,59 @@ class ImageVisualize:
         return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
 
     @classmethod
-    def label_box(cls, img, boxes, labels, colors=None, line_thickness=None):
-        """目标框 + 标签
+    def label_box(cls, img, boxes, labels, colors=None, line_thickness=None, inplace=False):
+        """boxes + label text, text belong to the box, do not need text area specially
+        note, do not support Chinese
         boxes: (-1, 4)
         """
-        img = img.copy()
+        if not inplace:
+            img = img.copy()
+
         line_thickness = line_thickness or round(0.002 * (img.shape[0] + img.shape[1]) / 2) + 1  # line/font thickness
         colors = colors or [get_color_array(0)] * len(boxes)
         labels = [str(i) for i in labels]
 
-        img = cls.box(img, boxes, visual_type=RECTANGLE, colors=colors, line_thickness=line_thickness)
+        cls.box(img, boxes, visual_type=RECTANGLE, colors=colors, line_thickness=line_thickness, inplace=True)
 
         # visual label
         for i in range(len(labels)):
             xyxy = boxes[i]
-            c1, c2 = (int(xyxy[0]), int(xyxy[1])), (int(xyxy[2]), int(xyxy[3]))
-
-            tf = max(line_thickness - 1, 1)  # font thickness
-            t_size = cv2.getTextSize(labels[i], 0, fontScale=line_thickness / 5, thickness=tf)[0]
-            c2 = c1[0] + t_size[0], c1[1] - t_size[1] - 3
-            cv2.rectangle(img, c1, c2, colors[i], -1, cv2.LINE_AA)  # filled
-            cv2.putText(img, labels[i], (c1[0], c1[1] - 2), 0, line_thickness / 5, [225, 255, 255], thickness=tf,
-                        lineType=cv2.LINE_AA)
+            cls.label(img, labels[i], lt=(int(xyxy[0]), int(xyxy[1])), bg_color=colors[i], thickness=line_thickness, inplace=True)
 
         return img
 
     @staticmethod
-    def block(img, boxes, visual_type=RECTANGLE, colors=None, alpha=1):
-        """目标块
+    def label(img, label, lt=(0, 0), bg_color=None, font_color=None, thickness=None, inplace=False):
+        """only label text, do not need text area"""
+        if not inplace:
+            img = img.copy()
+
+        bg_color = bg_color or get_color_array(name='Black')
+        font_color = font_color or get_color_array(name='White')
+        label = str(label)
+
+        thickness = thickness or round(0.01 * (img.shape[0] + img.shape[1]) / 2)
+        thickness = max(thickness, 1)  # font thickness
+        font_scale = thickness / 5
+
+        t_size = cv2.getTextSize(label, 0, fontScale=font_scale, thickness=thickness)[0]
+
+        bg_rd = (lt[0] + t_size[0], lt[1] + t_size[1] + thickness * 2)
+        text_ld = (lt[0], lt[1] + t_size[1] + thickness)
+        cv2.rectangle(img, lt, bg_rd, bg_color, -1, cv2.LINE_AA)  # filled
+        cv2.putText(img, label, text_ld, 0, font_scale, font_color, thickness=thickness,
+                    lineType=cv2.LINE_AA)
+
+        return img
+
+    @staticmethod
+    def block(img, boxes, visual_type=RECTANGLE, colors=None, alpha=1, inplace=False):
+        """color block, filled box
         boxes: polygon: (-1, -1, 2) or rectangle: (-1, 4)
         alpha: [0, 1], 1 gives opaque totally
         """
-        img = img.copy()
+        if not inplace:
+            img = img.copy()
         colors = colors or [get_color_array(0)] * len(boxes)
         boxes = np.array(boxes).astype(int)
 

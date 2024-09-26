@@ -7,7 +7,7 @@ import time
 import uuid
 from contextlib import nullcontext
 from pathlib import Path
-from typing import List
+from typing import List, Iterable
 
 import cv2
 import numpy as np
@@ -129,10 +129,13 @@ class Saver:
 
         self.stdout(path)
 
-    def save_txt(self, obj: iter, path, sep='\n', **kwargs):
+    def save_txt(self, obj: Iterable[str] | str, path, split_line=True, sep='\n', **kwargs):
         with open(path, 'w', encoding='utf8', errors='ignore') as f:
-            for o in obj:
-                f.write(f'{o}{sep}')
+            if split_line:
+                for o in obj:
+                    f.write(f'{o}{sep}')
+            else:
+                f.write(obj)
 
         self.stdout(path)
 
@@ -161,7 +164,7 @@ class Saver:
     def save_img(self, obj: np.ndarray, path, **kwargs):
         # it will error with chinese path in low version of cv2
         # it has fixed in high version already
-        cv2.imencode('.png', obj)[1].tofile(path)
+        cv2.imencode(Path(path).suffix, obj)[1].tofile(path)
         self.stdout(path)
         # flag = cv2.imwrite(path, obj)
         # if flag:
@@ -223,7 +226,7 @@ class Saver:
         except KeyError:
             self.stderr(save_path)
 
-    def save_image_to_pdf(self, obj: bytes or str, path):
+    def save_image_to_pdf(self, obj: bytes | str, path):
         import fitz  # pip install PyMuPDF
 
         if isinstance(obj, str):
@@ -314,7 +317,8 @@ class Loader:
 
         return obj
 
-    def load_txt(self, path, split_line=True, sep='\n') -> iter:
+    def load_txt(self, path, split_line=True, sep='\n') -> str | Iterable[str]:
+        # todo: maybe create a new function called load_txtl, like josnl?
         with open(path, 'r', encoding='utf8', errors='ignore') as f:
             obj = f.read().rstrip()
             if split_line:
@@ -323,7 +327,7 @@ class Loader:
         self.stdout(path)
         return obj
 
-    def load_txt_dir(self, dirt: str or Path, fmt='*.txt'):
+    def load_txt_dir(self, dirt: str | Path, fmt='*.txt'):
         txts = []
         for fp in Path(dirt).glob(fmt):
             txts.append(self.load_txt(fp))
@@ -382,7 +386,7 @@ class Loader:
 
     def load_images_from_pdf(
             self,
-            obj: str or bytes, scale_ratio: float = 1.33,
+            obj: str | bytes, scale_ratio: float = 1.33,
             rotate: int = 0, alpha=False, bgr=False
     ) -> List[np.ndarray]:
         import fitz  # pip install PyMuPDF
@@ -412,7 +416,7 @@ class Loader:
 
     def load_images_from_pdf2(
             self,
-            obj: str or bytes, scale_ratio: float = 1.33,
+            obj: str | bytes, scale_ratio: float = 1.33,
     ) -> List[np.ndarray]:
         # pip install pdf2image
         from pdf2image import convert_from_path, convert_from_bytes, exceptions
