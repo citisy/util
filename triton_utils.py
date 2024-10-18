@@ -1,5 +1,6 @@
 import numpy as np
-from tritonclient.http import InferenceServerClient, InferInput, InferRequestedOutput, InferAsyncRequest    # pip install tritonclient[all]
+from tritonclient.http import InferenceServerClient, InferInput, InferRequestedOutput, InferAsyncRequest  # pip install tritonclient[all]
+
 from .log_utils import get_logger
 
 # https://docs.nvidia.com/deeplearning/triton-inference-server/user-guide/docs/user_guide/model_configuration.html#datatypes
@@ -15,13 +16,32 @@ datatypes = {
 
 
 class Requests:
+    """
+    note, InferenceServerClient intended to be used by a single thread,
+    if using in a multi-thread like flask app, usually got errors like
+    `greenlet.error: cannot switch to a different thread (which happens to have exited)`
+    so using the following scripts to initialize the client to avoid the errors:
+        ```
+        class App:
+            @property
+            def trt_client():
+                return Requests()
+        ```
+    instead of:
+        ```
+        class App:
+            def __init__():
+                self.trt_client = Requests()
+        ```
+
+    """
+
     def __init__(self, url='127.0.0.1:8000', verbose=False, logger=None, **kwargs):
         self.client = InferenceServerClient(url=url, verbose=False, **kwargs)
         self.verbose = verbose
         self.logger = get_logger(logger)
         self.model_configs = {}
         self.model_versions = {}
-        # self.init()
 
     def init(self):
         model_info = self.client.get_model_repository_index()

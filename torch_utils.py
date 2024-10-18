@@ -278,6 +278,15 @@ class ModuleManager:
 
         return torch.cat(temp)
 
+    @staticmethod
+    def checkpoint(module: nn.Module, call_func, *args, **kwargs):
+        from torch.utils.checkpoint import checkpoint
+
+        if module.training:
+            return checkpoint(call_func, *args, use_reentrant=False, **kwargs)
+        else:
+            return call_func(*args, **kwargs)
+
     @classmethod
     def initialize_layers(cls, module, init_gain=0.02, init_type='normal'):
         """trace each module, initialize the variables
@@ -913,6 +922,7 @@ class SchedulerMaker:
         Create a schedule with a constant learning rate preceded by a warmup period during which the learning rate
         increases linearly between 0 and the initial lr set in the optimizer.
         """
+
         def lr_lambda(current_step: int):
             if current_step < num_warmup_steps:
                 return float(current_step) / float(max(1.0, num_warmup_steps))
@@ -967,6 +977,7 @@ class SchedulerMaker:
             num_training_steps (`int`):
                 The total number of training steps.
         """
+
         def lr_lambda(current_step: int):
             if current_step < num_warmup_steps:
                 return float(current_step) / float(max(1, num_warmup_steps))
@@ -997,6 +1008,7 @@ class SchedulerMaker:
                 value to 0 following a half-cosine).
 
         """
+
         def lr_lambda(current_step):
             if current_step < num_warmup_steps:
                 return float(current_step) / float(max(1, num_warmup_steps))
@@ -1020,6 +1032,7 @@ class SchedulerMaker:
             num_cycles (`int`, *optional*, defaults to 1):
                 The number of hard restarts to use.
         """
+
         def lr_lambda(current_step):
             if current_step < num_warmup_steps:
                 return float(current_step) / float(max(1, num_warmup_steps))
