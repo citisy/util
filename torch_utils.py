@@ -280,9 +280,13 @@ class ModuleManager:
 
     @staticmethod
     def checkpoint(module: nn.Module, call_func, *args, **kwargs):
+        """note, if using checkpoint, it is best not to use it in the first layer of the module,
+        as it usually does not contain gradients, thought can set `x.requires_grad_(True)` to pass it,
+        but it does not work yet always"""
         from torch.utils.checkpoint import checkpoint
 
-        if module.training:
+        if module.training:  # only work on train step
+            # note, if having kwargs, use `use_reentrant=False`
             return checkpoint(call_func, *args, use_reentrant=False, **kwargs)
         else:
             return call_func(*args, **kwargs)
@@ -435,12 +439,13 @@ class ModuleManager:
         return r
 
     @classmethod
-    def apply(cls, module, func, key=None, include=(), exclude=(), is_last=False, **func_kwargs):
+    def apply(cls, module, func, key=None, include=(), exclude=(), is_last_module=False, **func_kwargs):
         """
-        # freeze encoder and decoder layer, train the head layer
-        >>> ModuleManager.apply(nn.Module(), ModuleManager.freeze_module, include=('encoder', 'decoder'), exclude=('head', ), is_last=True)
+        Examples:
+            # freeze encoder and decoder layer, train the head layer
+            >>> ModuleManager.apply(nn.Module(), ModuleManager.freeze_module, include=('encoder', 'decoder'), exclude=('head', ), is_last_module=True)
         """
-        objs = cls.get_module_by_key(module, key=key, include=include, exclude=exclude, is_last_module=is_last, is_return_last_module=True)
+        objs = cls.get_module_by_key(module, key=key, include=include, exclude=exclude, is_last_module=is_last_module, is_return_last_module=True)
 
         for current_m, name, full_name in objs:
             func(current_m, **func_kwargs)
@@ -575,6 +580,7 @@ class EarlyStopping:
     def step(self, period, score):
         if period < self.min_period or score < self.ignore_min_score:
             self.last_period = period
+            self.best_score = score
             return False
 
         if score - self.best_score > self.thres:
@@ -868,7 +874,7 @@ class Converter:
 
 def make_optimizer_cls(name: str):
     if name in {"Lion"}:
-        import lion_pytorch
+        import lion_pytorch  # pip install lion_pytorch
         return getattr(lion_pytorch, name)
 
     elif name in {

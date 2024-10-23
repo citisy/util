@@ -41,7 +41,8 @@ suffixes_dict = dict(
     excel=('.xlsx', '.xls'),
     word=('.docx', '.doc'),
     pdf=('.pdf',),
-    np=('.npy', '.npz')
+    npy=('.npy',),
+    npz=('.npz',)
 )
 
 
@@ -52,6 +53,8 @@ def auto_suffix(obj):
         s = suffixes_dict['json'][0]
     elif isinstance(obj, np.ndarray) and obj.dtype == np.uint8:
         s = suffixes_dict['img'][0]
+    elif isinstance(obj, np.ndarray):
+        s = suffixes_dict['npy'][0]
     elif isinstance(obj, pd.DataFrame):
         s = suffixes_dict['csv'][0]
     else:
@@ -80,6 +83,8 @@ class Saver:
             suffixes_dict['pkl']: self.save_pkl,
             suffixes_dict['joblib']: self.save_joblib,
             suffixes_dict['img']: self.save_img,
+            suffixes_dict['npy']: self.save_npy,
+            suffixes_dict['npz']: self.save_npz,
             suffixes_dict['csv']: self.save_csv,
             suffixes_dict['excel']: self.save_excel
         }
@@ -129,13 +134,15 @@ class Saver:
 
         self.stdout(path)
 
-    def save_txt(self, obj: Iterable[str] | str, path, split_line=True, sep='\n', **kwargs):
+    def save_txt(self, obj: Iterable[str] | str, path, sep='\n', **kwargs):
+        """if obj is str, write the str to file directly,
+        if obj is list, write line by line with sep token"""
         with open(path, 'w', encoding='utf8', errors='ignore') as f:
-            if split_line:
+            if isinstance(obj, str):
+                f.write(obj)
+            else:
                 for o in obj:
                     f.write(f'{o}{sep}')
-            else:
-                f.write(obj)
 
         self.stdout(path)
 
@@ -172,8 +179,12 @@ class Saver:
         # else:
         #     self.stderr(path)
 
-    def save_np_array(self, obj: np.ndarray, path, **kwargs):
-        np.savetxt(path, obj, **kwargs)
+    def save_npy(self, obj: np.ndarray, path, **kwargs):
+        np.save(path, obj, **kwargs)
+        self.stdout(path)
+
+    def save_npz(self, obj: List[np.ndarray], path, **kwargs):
+        np.savez(path, *obj, **kwargs)
         self.stdout(path)
 
     def save_csv(self, obj: pd.DataFrame, path, **kwargs):
@@ -271,6 +282,8 @@ class Loader:
             suffixes_dict['txt']: self.load_txt,
             suffixes_dict['pkl']: self.load_pkl,
             suffixes_dict['img']: self.load_img,
+            suffixes_dict['npy']: self.load_np_array,
+            suffixes_dict['npz']: self.load_np_array,
             suffixes_dict['excel']: self.load_excel
         }
 
@@ -437,6 +450,24 @@ class Loader:
 
         return images
 
+    def load_np_array(self, path):
+        obj = np.load(path)
+        self.stdout(path)
+        return obj
+
+    def load_zip(self, path):
+        from zipfile import ZipFile
+
+        objs = []
+        with ZipFile(path, 'r') as zip_file:
+            for fp in zip_file.namelist():
+                if fp.endswith('/'):  # is dir
+                    continue
+                objs.append(zip_file.open(fp).read())
+
+        self.stdout(path)
+        return objs
+
 
 class BaseCacher:
     RANDOM = 0
@@ -450,19 +481,25 @@ class BaseCacher:
     def __call__(self, *args, **kwargs):
         return self.cache_one(*args, **kwargs)
 
-    def cache_one(self, obj, _id=None, **kwargs):
+    def cache_one(self, obj, **kwargs):
         raise NotImplemented
 
-    def cache_batch(self, objs, _ids=None, **kwargs):
+    def cache_batch(self, objs, **kwargs):
+        raise NotImplemented
+
+    def delete_one(self, **kwargs):
+        raise NotImplemented
+
+    def delete_batch(self, **kwargs):
         raise NotImplemented
 
     def delete_over_range(self, **kwargs):
         raise NotImplemented
 
-    def get_one(self, _id=None, key=None, search_type=None, **kwargs):
+    def get_one(self, **kwargs):
         raise NotImplemented
 
-    def get_batch(self, _ids=None, key=None, size=None, search_type=None, **kwargs):
+    def get_batch(self, **kwargs):
         raise NotImplemented
 
 
@@ -480,6 +517,12 @@ class Cacher(BaseCacher):
     def cache_batch(self, objs, _ids=None, **kwargs):
         _ids = _ids or [None] * len(objs)
         return [self.cache_one(obj, _id=_id) for obj, _id in zip(objs, _ids)]
+
+    def delete_one(self, _id=None, **kwargs):
+        return self.deleter(_id)
+
+    def delete_batch(self, _ids=(), **kwargs):
+        return [self.delete_one(_id) for _id in _ids]
 
     def delete_over_range(self, **kwargs):
         if not self.max_size:
@@ -540,15 +583,21 @@ class MemoryCacher(BaseCacher):
             keys = sorted(keys)
             return keys[-size:]
 
+    def delete_one(self, _id=None, **kwargs):
+        self.cache.pop(_id)
+        self.stdout_method(self.delete_stdout_fmt % str(_id))
+
+    def delete_batch(self, _ids=None, **kwargs):
+        for _id in _ids:
+            self.delete_one(_id=_id, **kwargs)
+
     def delete_over_range(self, **kwargs):
         if not self.max_size:
             return
 
         if len(self.cache) >= self.max_size:
             _ids = self._search(list(self.cache.keys()), len(self.cache) - self.max_size, search_type=self.OLDEST)
-            for _id in _ids:
-                self.cache.pop(_id)
-                self.stdout_method(self.delete_stdout_fmt % str(_id))
+            self.delete_batch(_ids, **kwargs)
 
     def get_one(self, _id=None, key=None, search_type=None, **kwargs):
         if _id is None:
@@ -729,10 +778,10 @@ class MongoDBCacher(BaseCacher):
 class RedisCacher(BaseCacher):
     def __init__(self, host='127.0.0.1', port=6379, db=0,
                  max_size=None, verbose=True, stdout_method=print,
-                 **mongo_kwargs) -> None:
+                 **redis_kwargs) -> None:
         import redis
 
-        self.client = redis.Redis(host=host, port=port, db=db)
+        self.client = redis.Redis(host=host, port=port, db=db, **redis_kwargs)
         self.max_size = max_size
         self.verbose = verbose
         self.stdout_method = stdout_method if verbose else FakeIo()
@@ -765,9 +814,8 @@ class RedisCacher(BaseCacher):
         if not self.max_size:
             return
 
-        if self.client.dbsize > self.max_size - batch_size:
+        if self.client.dbsize() > self.max_size - batch_size:
             raise NotImplementedError
-            self.client.delete()
 
     def get_one(self, _id=None, **kwargs):
         if _id is None:
@@ -788,7 +836,130 @@ class ESCacher(BaseCacher):
 
 
 class PGSQLCacher(BaseCacher):
-    """todo"""
+    def __init__(self, host='127.0.0.1', port=5432, user=None, password=None, database=None,
+                 table=None,
+                 max_size=None, verbose=True, stdout_method=print,
+                 **pg_kwargs):
+        import psycopg2  # pip install psycopg2-binary
+
+        self.conn = psycopg2.connect(
+            host=host,
+            port=port,
+            user=user,
+            password=password,
+            database=database,
+            **pg_kwargs
+        )
+        self.table = table
+        self.max_size = max_size
+        self.verbose = verbose
+        self.stdout_method = stdout_method if verbose else FakeIo()
+
+    def get_one(self, **kwargs) -> pd.DataFrame:
+        """
+        Usage:
+            >>> PGSQLCacher().get_one(id=0)
+            >>> PGSQLCacher().get_batch(k1='s1', k2='s2')
+
+        """
+        s = []
+        for k, v in kwargs.items():
+            s.append(f'{k}={v}')
+        s = ' and '.join(s)
+        df = pd.read_sql(f"select * from {self.table} where {s} limit 1;", con=self.conn)
+
+        return df
+
+    def get_batch(self, size=None, **kwargs):
+        """
+        Usage:
+            >>> PGSQLCacher().get_batch(id=[0, 1])
+            >>> PGSQLCacher().get_batch(k1=['s1', 's2'], k2=['s3'])
+
+        """
+        s = []
+        for k, v in kwargs.items():
+            v = [str(vv) for vv in v]
+            s.append(f'{k} in ({", ".join(v)})')
+
+        s = ' and '.join(s)
+        sql = f"select * from {self.table} where {s}"
+        if size:
+            sql += f'limit {size}'
+
+        df = pd.read_sql(sql, con=self.conn)
+
+        return df
+
+
+class MilvusCacher(BaseCacher):
+    def __init__(self, collection_name, **kwargs):
+        from pymilvus import MilvusClient  # pip install pymilvus
+
+        self.client = MilvusClient(**kwargs)
+        self.collection_name = collection_name
+
+    def make_example_data(self):
+        des = self.client.describe_collection(self.collection_name)
+        fields = des['fields']
+
+    def cache_one(self, obj: dict, **kwargs):
+        kwargs.setdefault('collection_name', self.collection_name)
+        kwargs.setdefault('data', obj)
+        res = self.client.insert(data=obj, **kwargs)
+        return res['ids']
+
+    def cache_batch(self, objs: List[dict], **kwargs):
+        kwargs.setdefault('collection_name', self.collection_name)
+        kwargs.setdefault('data', objs)
+        res = self.client.insert(**kwargs)
+        return res['ids']
+
+    def delete_batch(self, **kwargs):
+        kwargs.setdefault('collection_name', self.collection_name)
+        return self.client.delete(**kwargs)
+
+    def get_one(self, vector=None, is_search=True, **kwargs) -> dict:
+        """
+        Args:
+            vector:
+            is_search:
+                True, use vector to query
+                False, use key to query
+            **kwargs:
+
+        Usage:
+            >>> MilvusCacher().get_batch(np.zeros(128))
+            >>> MilvusCacher().get_one(filter='id==1', is_search=False)
+            >>> MilvusCacher().get_one(ids=[1], is_search=False)
+
+        """
+        kwargs.setdefault('collection_name', self.collection_name)
+        kwargs.setdefault('limit', 1)
+
+        if is_search:
+            if vector:
+                kwargs.setdefault('data', [vector])
+
+            res = self.client.search(**kwargs)[0]
+
+        else:
+            res = self.client.query(**kwargs)
+
+        return res[0]
+
+    def get_batch(self, vectors=None, is_search=True, size=None, **kwargs) -> List[List[dict]] | List[dict]:
+        kwargs.setdefault('collection_name', self.collection_name)
+        kwargs.setdefault('limit', size)
+        if is_search:
+            if vectors:
+                kwargs.setdefault('data', vectors)
+            res = self.client.search(**kwargs)
+
+        else:
+            res = self.client.query(**kwargs)
+
+        return list(res)
 
 
 class FakeIo:
@@ -829,6 +1000,24 @@ class FakeIo:
 
 
 class FakeApp:
+    """a placeholder, empty io method to cheat some functions which must use an app method,
+    it means that the method do nothing in fact,
+    it is useful to reduce the amounts of code changes
+
+    Examples
+    .. code-block:: python
+
+        # real app
+        app = FakeApp()
+
+        # fake app
+        app = FakeApp()
+
+        @app.route(...)
+        def func(...):
+            ...
+    """
+
     def __init__(self, *args, **kwargs):
         self.config = dict()
         self.conf = dict()

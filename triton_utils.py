@@ -61,6 +61,16 @@ class Requests:
         if self.verbose:
             self.logger.info(self.model_configs)
 
+    def load(self, model_name):
+        """must work on explicit model
+        run tritonserver with `--model-control-mode explicit`"""
+        self.client.load_model(model_name)
+        self.init()
+
+    def unload(self, model_name):
+        self.client.unload_model(model_name)
+        self.init()
+
     def async_infer(self, *inputs: 'np.ndarray', model_name, model_version=None):
         if not self.model_versions:
             # note, in some version of triton, it will be got some unknown exceptions when init early

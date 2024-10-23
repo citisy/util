@@ -1,22 +1,24 @@
-import io
 import base64
-import cv2
 import hashlib
+import io
 import json
-import numpy as np
 from pathlib import Path
-from .os_lib import FakeIo
-from .op_utils import IgnoreException
+from typing import Optional
 
+import cv2
+import numpy as np
+
+from .op_utils import IgnoreException
+from .os_lib import FakeIo
 
 ignore_exception = IgnoreException(stdout_method=FakeIo())
 
 
 class DataConvert:
     @classmethod
-    def custom_to_constant(cls, obj):
+    def custom_to_constant(cls, obj: Optional[list | dict | np.ndarray]):
         """convert a custom type(like np.ndarray) to a constant type(like int, float, str)
-        apply for json output
+        recurse to convert the obj
 
         >>>DataConvert.custom_to_constant({0: [np.array([1, 2, 3]), np.array([4, 5, 6])]})
         {0: [[1, 2, 3], [4, 5, 6]]}
@@ -61,6 +63,10 @@ class DataConvert:
     @classmethod
     def img_array_to_constant(cls, obj: np.ndarray) -> str:
         return cls.image_to_base64(obj)
+
+    @classmethod
+    def bytes_to_custom(cls, obj: bytes):
+        """bytes to custom type(like np.ndarray, list)"""
 
     @staticmethod
     def image_to_bytes(obj: np.ndarray, fmt='.png') -> bytes:
@@ -232,4 +238,3 @@ class InsConvert:
         f = io.BytesIO()
         f.write(obj)
         return f
-
