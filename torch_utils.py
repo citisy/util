@@ -3,6 +3,7 @@ import math
 import re
 from collections import OrderedDict
 from pathlib import Path
+from typing import Dict, Optional, Any
 
 import numpy as np
 import pandas as pd
@@ -308,8 +309,8 @@ class ModuleManager:
                 t = type(m)
 
                 if t is nn.BatchNorm2d:
-                    m.eps = 1e-3
-                    m.momentum = 0.03
+                    # m.eps = 1e-3
+                    # m.momentum = 0.03
                     m.weight.data.normal_(1.0, init_gain)
                     m.bias.data.fill_(0.)
 
@@ -460,6 +461,7 @@ class WeightsFormats:
         ['OpenVINO', 'openvino', '_openvino_model', False],
         ['TensorRT', 'engine', '.engine', True],
         ['CoreML', 'coreml', '.mlmodel', False],
+        ['Keras', '-', '.h5', True],
         ['TensorFlow', '-', '.ckpt/.h5', True],
         ['TensorFlow SavedModel', 'saved_model', '_saved_model', True],
         ['TensorFlow GraphDef', 'pb', '.pb', True],
@@ -522,7 +524,8 @@ class Load:
         load_dict = {
             'PyTorch': cls.from_ckpt,
             'TorchScript': cls.from_jit,
-            'Safetensors': cls.from_safetensors
+            'Safetensors': cls.from_safetensors,
+            'Keras': cls.from_h5,
         }
         k = WeightsFormats.get_format_from_suffix(save_path)
         return load_dict.get(k)(save_path, **kwargs)
@@ -535,11 +538,29 @@ class Load:
     def from_tf_ckpt(save_path, var_names=None, key_types=None, value_types=None, **kwargs):
         import tensorflow as tf
 
-        loader = lambda name: torch.from_numpy(tf.train.load_variable(save_path, name))
         assert var_names
         tensors = OrderedDict()
         for name in var_names:
-            tensors[name] = loader(name)
+            tensors[name] = torch.from_numpy(tf.train.load_variable(save_path, name))
+
+        tensors = Converter.tensors_from_tf_to_torch(tensors, key_types, value_types)
+        return tensors
+
+    @staticmethod
+    def from_h5(save_path, key_types=None, value_types=None, **kwargs):
+        import h5py
+
+        tensors = OrderedDict()
+        with h5py.File(save_path, 'r') as f:
+            if "layer_names" not in f.attrs and "model_weights" in f:
+                f = f["model_weights"]
+            layer_names = f.attrs['layer_names']
+
+            for layer in layer_names:
+                g = f[layer]
+                weight_names = g.attrs['weight_names']
+                for weight_name in weight_names:
+                    tensors[weight_name.decode("utf8")] = torch.from_numpy(np.asarray(g[weight_name]))
 
         tensors = Converter.tensors_from_tf_to_torch(tensors, key_types, value_types)
         return tensors
@@ -566,6 +587,16 @@ class Load:
 class EarlyStopping:
     def __init__(self, thres=0.005, patience=None, min_period=0, ignore_min_score=-1,
                  verbose=True, stdout_method=print):
+        """
+
+        Args:
+            thres: only updating the best_score and best_period when the increased score exceeds the threshold
+            patience: early stop when accumulated period more than patience
+            min_period: skip checking early stop when current period less than min_period
+            ignore_min_score: skip checking early stop when current score less than ignore_min_score
+            verbose: whether logging when early stop occurs or not
+            stdout_method: logging method
+        """
         self.thres = thres
         self.best_score = -1
         self.best_period = 0
@@ -691,7 +722,7 @@ class EMA:
 
 class Converter:
     @staticmethod
-    def arrays_to_tensors(objs: dict, device=None):
+    def arrays_to_tensors(objs: Dict[Any, Optional[np.ndarray | list | tuple]], device=None) -> Dict[Any, Optional[torch.Tensor]]:
         for k, v in objs.items():
             if isinstance(v, np.ndarray):
                 objs[k] = torch.from_numpy(v).to(device)
@@ -701,46 +732,81 @@ class Converter:
         return objs
 
     @staticmethod
-    def tensors_to_array(objs: dict):
+    def tensors_to_array(objs: Dict[Any, Optional[torch.Tensor]]) -> Dict[Any, np.ndarray]:
         for k, v in objs.items():
             if isinstance(k, torch.Tensor):
+                if k.dtype in (torch.float16, torch.bfloat16, torch.float64):
+                    v = v.to(torch.float32)
                 objs[k] = v.cpu().numpy()
 
         return objs
 
     @staticmethod
-    def convert_keys(state_dict: OrderedDict, convert_dict: dict):
+    def convert_keys(state_dict: OrderedDict | dict, convert_dict: dict) -> OrderedDict:
         """
-        Usages:
-            .. code-block:: python
+        Examples:
+            >>> state_dict = {'before.a.1.weight': 1, 'before.b.2.weight': 2}
 
-                model1 = ...
-                model2 = ...
-                convert_dict = {'before': 'after', 'before.a': 'after.aa', 'before.a.{0}.a': 'after.b.{0}.b}
+            >>> convert_dict = {'before': 'after'}
+            >>> Converter.convert_keys(state_dict, convert_dict)
+            OrderedDict([('after.a.1.weight', 1), ('after.b.2.weight', 2)])
 
-                state_dict = model1.state_dict()
-                # OrderedDict([('before.a.weight', ...), ('before.b.weight', ...), ('before.a.1.a.weight', ...), ('same.weight', ...)])
+            >>> convert_dict = {'before.{0}.': 'after.{0}.'}
+            >>> Converter.convert_keys(state_dict, convert_dict)
+            OrderedDict([('after.a.1.weight', 1), ('after.b.2.weight', 2)])
 
-                state_dict = Converter.convert_keys(state_dict, convert_dict)
-                # OrderedDict([('after.aa.weight', ...), ('after.b.weight', ...), ('before.b.1.b.weight', ...), ('same.weight', ...)])
+            >>> convert_dict = {'before.{0}.1': 'after.{0}.2'}
+            >>> Converter.convert_keys(state_dict, convert_dict)
+            OrderedDict([('after.a.2.weight', 1), ('before.b.2.weight', 2)])
 
-                model2.load_state_dict(state_dict)
+            >>> convert_dict = {'before.{a}.{0}.': 'after.{0}.{a}.'}
+            >>> Converter.convert_keys(state_dict, convert_dict)
+            OrderedDict([('after.1.a.weight', 1), ('after.2.b.weight', 2)])
+
+            >>> convert_dict = {'before.a.{0}.': 'after.a.{[0]+1}.'}
+            >>> Converter.convert_keys(state_dict, convert_dict)
+            OrderedDict([('after.a.2.weight', 1), ('before.b.2.weight', 2)])
+
+            >>> convert_dict = {'before.{0}.': 'after.{"[0]".replace("a", "aa")}.'}
+            >>> Converter.convert_keys(state_dict, convert_dict)
+            OrderedDict([('after.aa.1.weight', 1), ('after.b.2.weight', 2)])
+
+            >>> convert_dict = {'before.{0}.': 'after.{(lambda x: x.replace("a", "aa"))("[0]")}.'}
+            >>> Converter.convert_keys(state_dict, convert_dict)
+            OrderedDict([('after.aa.1.weight', 1), ('after.b.2.weight', 2)])
+
         """
         from .nlp_utils import PrefixTree
 
         def parse(s):
             """split the string with wildcards, and retrun their indexes
-            >>> parse('a.{0}.a')
-            (('a', '.', '{0}', '.', 'a'), {'idx1': [0], 'idx2': [2]})
-            # idx1 is wildcard's values, idx2 is index of wildcard in string
+            Examples:
+                # idx1 is wildcard's values, idx2 is start index of wildcard in string
+                >>> parse('a.{0}.a')
+                (('a', '.', '{0}', '.', 'a'), {'idx1': ['_0'], 'idx2': [2], 'ops': [None]})
+
+                >>> parse('a.{[0]+1}.a')
+                (('a', '.', '{0}', '.', 'a'), {'idx1': ['_0'], 'idx2': [2], 'ops': ['[##]+1']})
             """
-            match = re.findall('\{\d+?\}', s)
-            end, tmp, spans, idx1 = 0, s, [], []
+            match = re.findall('\{.+?\}', s)
+            end, tmp, spans, idx1, ops = 0, s, [], [], []
             for m in match:
+                op = None
                 start = tmp.index(m) + end
                 end = start + len(m)
                 spans.append((start, end))
-                idx1.append(int(m[1:-1]))
+                k = m[1:-1]
+
+                r = re.search('\[(.+?)\]', k)
+                if r:
+                    op = k.replace(r.group(0), '[##]')
+                    k = r.group(1)
+
+                if k.isdigit():
+                    k = '_' + k
+
+                idx1.append(k)
+                ops.append(op)
                 tmp = s[end:]
 
             r = []
@@ -754,7 +820,7 @@ class Converter:
                 end = end1
 
             r += list(s[end: len(s)])
-            return tuple(r), {'idx1': idx1, 'idx2': idx2}
+            return tuple(r), {'idx1': idx1, 'idx2': idx2, 'ops': ops}
 
         split_convert_dict = {}
         a_values, b_values = {}, {}
@@ -780,27 +846,25 @@ class Converter:
                 p, pa = '', ''
                 for i, s in enumerate(a):
                     if i in a_value['idx2']:
-                        p += '(.+?)'
-                        pa += '%s'
+                        ii = a_value['idx2'].index(i)
+                        _k = a_value["idx1"][ii]
+                        p += f'(?P<{_k}>.+?)'
+                        pa += '{' + _k + '}'
                     else:
                         p += '\\' + s if s == '.' else s
                         pa += s
 
                 if a_value['idx2']:
-                    # fill the wildcards with the values for before string
-                    ra = re.findall(p, k)[0]
-                    if isinstance(ra, str):
-                        ra = (ra,)
-                    pa = pa % ra
+                    ra = re.search(p, k)
+                    r = ra.groupdict()
+                    pa = pa.format(**r)
 
-                    sort_ra = [None] * (max(a_value['idx1']) + 1)
-                    for i, idx in enumerate(a_value['idx1']):
-                        sort_ra[idx] = ra[i]
-
-                    # fill the wildcards with the values for after string
-                    for idx1, idx2 in zip(b_value['idx1'], b_value['idx2']):
-                        b = list(b)
-                        b[idx2] = sort_ra[idx1]
+                    b = list(b)
+                    for idx1, idx2, op in zip(b_value['idx1'], b_value['idx2'], b_value['ops']):
+                        _v = r[idx1]
+                        if op:
+                            _v = str(eval(op.replace('[##]', f"{_v}")))
+                        b[idx2] = _v
 
                 # replace before string to after string
                 pb = ''.join(b)
@@ -812,12 +876,12 @@ class Converter:
     @staticmethod
     def conv_weight_from_tf_to_torch(weight):
         """(h, w, c, n) -> (n, c, h, w)"""
-        return weight.transpose(3, 2, 0, 1)
+        return weight.permute(3, 2, 0, 1)
 
     @staticmethod
     def dw_conv_weight_from_tf_to_torch(weight):
         """(h, w, n, c) -> (n, c, h, w)"""
-        return weight.transpose(2, 3, 0, 1)
+        return weight.permute(2, 3, 0, 1)
 
     @staticmethod
     def linear_weight_from_tf_to_torch(weight):
@@ -825,7 +889,7 @@ class Converter:
         if len(weight.size()) == 3:
             weight = weight.squeeze(0)
         if len(weight.size()) == 2:
-            weight = weight.transpose(1, 0)
+            weight = weight.permute(1, 0)
         return weight
 
     @classmethod
@@ -841,26 +905,43 @@ class Converter:
         'b': 'bias',
         'g': 'gamma',
         'bt': 'beta',
+        'nm': 'running_mean',   # norm mean
+        'nv': 'running_var',    # norm var
     }
 
     @classmethod
-    def tensors_from_tf_to_torch(cls, state_dict: OrderedDict, key_types=None, value_types=None):
+    def tensors_from_tf_to_torch(cls, state_dict, key_types=None, value_types=None) -> OrderedDict:
         """
 
         Args:
-            state_dict:
+            state_dict (OrderedDict | dict):
             key_types (list): see `convert_tf_types`
-            value_types (list): see `convert_tf_funcs`
+            value_types (list): only work when key_type is 'w',see `make_convert_tf_funcs`
+
+        Examples
+            >>> Converter.tensors_from_tf_to_torch({'ln_1/g:0': 0}, key_types=['w'])
+            OrderedDict([('ln_1.weight', 0)])
+
+            >>> Converter.tensors_from_tf_to_torch({'ln_1/g:0': 0}, key_types=['g'])
+            OrderedDict([('ln_1.gamma', 0)])
+
+            >>> Converter.tensors_from_tf_to_torch({'ln_1/g:0': torch.zeros((2, 1))}, key_types=['w'], value_types=['l'])
+            OrderedDict([('ln_1.weight', tensor([[0., 0.]]))])
+            # shape: (2, 1) -> (1, 2)
 
         """
 
         key_types = key_types or [''] * len(state_dict)
         value_types = value_types or [''] * len(state_dict)
+
+        assert len(key_types) == len(state_dict)
+        assert len(value_types) == len(state_dict)
+
         d = OrderedDict()
         convert_tf_funcs = cls.make_convert_tf_funcs()
 
         for i, (k, v) in enumerate(state_dict.items()):
-            tmp = k.split('/')
+            tmp = re.split(r'[/\.]', k)
             suffix = tmp[-1]
             suffix = cls.convert_tf_types.get(key_types[i], suffix)
             k = '.'.join(tmp[:-1]) + '.' + suffix
