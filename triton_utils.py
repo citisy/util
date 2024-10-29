@@ -48,6 +48,8 @@ class Requests:
 
         for info in model_info:
             name = info['name']
+            if 'version' not in info:
+                continue
             version = info['version']
             state = info['state']
 
