@@ -1,35 +1,36 @@
+"""utils for mathematical calculation"""
 import numpy as np
 
 
 def argsort_and_unique(x, thres=0, keep_small=True):
-    """sort the 1-D araay and ignore the slim difference
+    """sort the 1-D araay and filter the slim difference values
     Args:
         x: 1-D array
-        thres: merge values if the difference of two values lower than the thres
-        keep_small: if two values are merged, keep the large one
+        thres: difference of values lower than the thres will be filtered
+        keep_small: if any values will be filtered, true to keep the smallest one, false to keep the largest one
 
     Returns:
         order: sorted order of x
         y: x after sorted
 
     Usage:
-        >>> # just sort the values
+        # just sort the values
         >>> x = [1, 2, 3, 4, 5]
         >>> order, _ = argsort_and_unique(x)
         >>> order
         [0 1 2 3 4]
 
-        >>> # merge values if the difference of two values lower than the thres
-        >>> # and then, sorted them
+        # difference of values lower than the thres will be seemed as duplicated values
+        # filter them, and then, sorted them
         >>> order, y = argsort_and_unique(x, thres=1)
         >>> order
         [0 0 1 1 2]
-        >>> y   # 2, 4 will be ignored
+        >>> y   # default keep the smallest one, values of 2, 4 will be filtered
         [1 3 5]
 
-        >>> # if two values are merged, keep the large one
+        # if any values will be filtered, keep the largest one
         >>> _, y = argsort_and_unique(x, thres=1, keep_small=False)
-        >>> y   # 'cause keep the bigger item, 1, 3 will be ignored
+        >>> y   # 'cause keep the bigger item, 1, 3 will be filtered
         [2 4 5]
 
         >>> x = [7, 5, 2, 1, 4]
@@ -79,15 +80,19 @@ def arg_order_sort_2D(x, key=None, **kwargs):
         arg (np.ndarray): 1-D array (m, )
 
     Usage:
-        >>> # sort the values by all the order keys
-        >>> x = np.array([[1, 2, 3, 5, 4], [10, 9, 8, 6, 7]]).T
+        # sort the values by all the order keys
+        >>> x = np.array([[1, 2, 2, 5, 4], [10, 9, 8, 9, 7]]).T
+
         >>> arg_order_sort_2D(x)
-        [0 1 2 4 3]
+        [0 2 1 4 3]
 
-        >>> # sort by x[:, 1] firstly; sort by x[:, 0] secondly
-        >>> order_sort_2D(x, key=(1, 0))
-        [3 4 2 1 0]
+        # sort by x[:, 1] firstly; sort by x[:, 0] secondly
+        >>> arg_order_sort_2D(x, key=(1, 0))
+        [4 2 1 3 0]
 
+        >>> np.argsort(x, axis=0).T
+        [[0 1 2 4 3]
+         [4 2 1 3 0]]
     """
     x = np.array(x)
     if key is None:
@@ -118,16 +123,21 @@ def order_sort_2D(x, key=None, **kwargs):
         y (np.ndarray): 2-D array (m, n), x after sorted
 
     Usage:
-        >>> # sort the values by all the order keys
-        >>> x = np.array([[1, 2, 3, 5, 4], [10, 9, 8, 6, 7]]).T
-        >>> order_sort_2D(x).T
-        [[ 1  2  3  4  5]
-         [10  9  8  7  6]]
+        # sort the values by all the order keys
+        >>> x = np.array([[1, 2, 2, 5, 4], [10, 9, 8, 9, 7]]).T
 
-        >>> # sort by x[:, 1] firstly, sort by x[:, 0] secondly
+        >>> order_sort_2D(x).T
+        [[ 1  2  2  4  5]
+         [10  8  9  7  9]]
+
+        # sort by x[:, 1] firstly, sort by x[:, 0] secondly
         >>> order_sort_2D(x, key=(1, 0)).T
-        [[ 5  4  3  2  1]
-        [ 6  7  8  9 10]]
+        [[ 4  2  2  5  1]
+         [ 7  8  9  9 10]]
+
+        >>> np.sort(x, axis=0).T
+        [[ 1  2  2  4  5]
+         [ 7  8  9  9 10]]
 
     """
     arg = arg_order_sort_2D(x, key=key, **kwargs)

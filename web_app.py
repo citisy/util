@@ -1,3 +1,4 @@
+"""utils for creating a web app to provide api endpoints"""
 import json
 import pydantic
 
@@ -18,6 +19,8 @@ class FastapiOp:
         """
         {path1: {path2: router_kwargs}}
         """
+        from fastapi.middleware.cors import CORSMiddleware
+
         app = cls.create_app()
 
         for path1, cfg in configs.items():
@@ -26,6 +29,14 @@ class FastapiOp:
                 cls.register_post_router(sub_app, path2, **router_kwargs)
 
             app.include_router(sub_app, prefix=path1)
+
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 
         return app
 

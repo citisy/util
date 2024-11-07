@@ -1,3 +1,4 @@
+"""utils for visualize something(like image, text, etc.)"""
 import inspect
 import re
 from typing import List
@@ -487,7 +488,7 @@ POLAR = 1
 
 
 class Formulae2DVisualize:
-    """Visualize by mathplotlib
+    """Visualize by `matplotlib`
     Some definition:
         implicit formulae:
             e.g. `f(x, y) = 0`

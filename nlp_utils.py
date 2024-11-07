@@ -1,3 +1,4 @@
+"""utils for nature language task"""
 import difflib
 import re
 from typing import List
@@ -101,12 +102,22 @@ class PrefixTree:
     Examples
         >>> words = [['a', 'b', 'c'], ['a', '{}', 'd']]
         >>> tree = PrefixTree(words, [0, 1])
+
+        # similar to `dict.get()`
         >>> tree.get('abc')
         0
+
+        # shot the wildcard pattern
         >>> tree.get('abcd')
         1
+
+        # search failed
         >>> tree.get('abcde')
         None
+
+        # return the last best match
+        >>> tree.get('abcde', return_last=True)
+        1
 
     Notes
         the last token can not be wildcard!

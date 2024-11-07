@@ -1,3 +1,4 @@
+"""utils for operating instances of python, decorator usually"""
 import time
 from functools import wraps
 from .os_lib import FakeIo

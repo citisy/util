@@ -1,3 +1,4 @@
+"""utils for convert one object(like data structure of python, instance of python, file of os, etc.) to another object"""
 import base64
 import hashlib
 import io
@@ -15,6 +16,8 @@ ignore_exception = IgnoreException(stdout_method=FakeIo())
 
 
 class DataConvert:
+    """convert one data structure to another data structure"""
+
     @classmethod
     def custom_to_constant(cls, obj: Optional[list | dict | np.ndarray]):
         """convert a custom type(like np.ndarray) to a constant type(like int, float, str)
@@ -218,11 +221,13 @@ class DataConvert:
         return hash_sha256.hexdigest()
 
 
-class InsConvert:
+class DataInsConvert:
+    """convert one data structure to a python instance"""
+
     @staticmethod
     def str_to_instance(obj: str):
         """give a str, return a class instance
-        >>> InsConvert.str_to_instance('utils.InsConvert')
+        >>> DataInsConvert.str_to_instance('utils.DataInsConvert')
         """
         import importlib
         module, cls = obj.rsplit('.', 1)
@@ -238,3 +243,19 @@ class InsConvert:
         f = io.BytesIO()
         f.write(obj)
         return f
+
+
+class FileConvert:
+    """convert one file to another file(s)"""
+
+    @staticmethod
+    def tar_to_zip(in_path: str, out_path: str):
+        pass
+
+    @staticmethod
+    def pdf_to_images(in_path: str, out_dir: str):
+        pass
+
+    @staticmethod
+    def images_to_pdf(in_dir: str, out_path: str):
+        pass

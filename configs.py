@@ -1,3 +1,4 @@
+"""utils for configs, usually used in project startup, function definition, etc."""
 import copy
 from typing import List
 

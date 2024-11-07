@@ -1,3 +1,5 @@
+"""utils for loading data from operating system(like file system, database, etc.) to memory,
+or saving data from memory to operating system"""
 import configparser
 import json
 import os
