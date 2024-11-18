@@ -673,11 +673,11 @@ class FileCacher(BaseCacher):
             _fns.append(file_name)
         return _fns
 
-    def delete_over_range(self, suffix='', **kwargs):
+    def delete_over_range(self, suffix='', ignore_keys=(), **kwargs):
         if not self.max_size:
             return
 
-        caches = [str(_) for _ in self.cache_dir.glob(f'*{suffix}')]
+        caches = [str(_) for _ in self.cache_dir.glob(f'*{suffix}') if str(_) not in ignore_keys]
 
         if len(caches) > self.max_size:
             try:
