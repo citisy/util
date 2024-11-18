@@ -49,7 +49,7 @@ suffixes_dict = dict(
 
 
 def auto_suffix(obj):
-    if isinstance(obj, (list, tuple, set)):
+    if isinstance(obj, (list, tuple, set, str)):
         s = suffixes_dict['txt'][0]
     elif isinstance(obj, dict):
         s = suffixes_dict['json'][0]

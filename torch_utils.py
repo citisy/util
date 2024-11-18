@@ -11,6 +11,8 @@ import pandas as pd
 import torch
 from torch import nn
 
+from . import math_utils
+
 
 class ModuleInfo:
     @classmethod
@@ -229,9 +231,12 @@ class ModuleManager:
                 m.freeze()
 
     @classmethod
-    def low_memory_run(cls, module: nn.Module, call_func, device, *args, **kwargs):
+    def low_memory_run(cls, module: nn.Module, call_func, device, *args, require_grad=True, **kwargs):
         """only send the module to gpu when the module need to be run,
         and the gpu will be released after running"""
+        if require_grad and module.training:
+            return call_func(*args, **kwargs)
+
         module.to(device)
         obj = call_func(*args, **kwargs)
         module.cpu()
@@ -278,16 +283,28 @@ class ModuleManager:
             rets = call_func(*tmp_args, **tmp_kwargs)
             temp.append(rets)
 
-        return torch.cat(temp)
+        if isinstance(temp[0], torch.Tensor):
+            temp = torch.cat(temp)
+        else:
+            temp = tuple((torch.cat(t) for t in math_utils.transpose(temp)))
+        return temp
 
     @staticmethod
-    def checkpoint(module: nn.Module, call_func, *args, **kwargs):
+    def checkpoint(module: nn.Module, call_func, *args, is_first_layer=False, **kwargs):
         """note, if using checkpoint, it is best not to use it in the first layer of the module,
         as it usually does not contain gradients, thought can set `x.requires_grad_(True)` to pass it,
         but it does not work yet always"""
         from torch.utils.checkpoint import checkpoint
 
         if module.training:  # only work on train step
+            # prevent to no grad
+            if is_first_layer:
+                for arg in args:
+                    if isinstance(arg, torch.Tensor):
+                        arg.requires_grad_(True)
+                for arg in kwargs.values():
+                    if isinstance(arg, torch.Tensor):
+                        arg.requires_grad_(True)
             # note, if having kwargs, use `use_reentrant=False`
             return checkpoint(call_func, *args, use_reentrant=False, **kwargs)
         else:
@@ -906,8 +923,8 @@ class Converter:
         'b': 'bias',
         'g': 'gamma',
         'bt': 'beta',
-        'nm': 'running_mean',   # norm mean
-        'nv': 'running_var',    # norm var
+        'nm': 'running_mean',  # norm mean
+        'nv': 'running_var',  # norm var
     }
 
     @classmethod

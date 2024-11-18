@@ -442,7 +442,7 @@ class MemoryInfo:
         stats = torch.cuda.memory_stats(device)
         active = stats['active_bytes.all.current']
         reserved = stats['reserved_bytes.all.current']
-        free_cuda, _ = torch.cuda.mem_get_info(torch.cuda.current_device())
+        free_cuda, _ = torch.cuda.mem_get_info(device)
         free_torch = reserved - active
         free_total = free_cuda + free_torch
         info = dict(
