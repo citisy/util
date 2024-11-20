@@ -234,13 +234,13 @@ class ModuleManager:
     def low_memory_run(cls, module: nn.Module, call_func, device, *args, require_grad=True, **kwargs):
         """only send the module to gpu when the module need to be run,
         and the gpu will be released after running"""
-        if require_grad and module.training:
-            return call_func(*args, **kwargs)
-
         module.to(device)
         obj = call_func(*args, **kwargs)
-        module.cpu()
-        cls.torch_gc()
+
+        if not (require_grad and module.training):
+            module.cpu()
+            cls.torch_gc()
+
         return obj
 
     @staticmethod
@@ -709,7 +709,7 @@ class EMA:
         for k, v in self.ema_model.state_dict().items():
             if v.dtype.is_floating_point:
                 v *= beta
-                v += (1 - beta) * msd[k].detach()
+                v += (1 - beta) * msd[k].to(v.device).detach()
 
     @torch.no_grad()
     def copy_attr(self, include=(), exclude=()):

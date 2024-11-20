@@ -5,6 +5,7 @@ import json
 import os
 import pickle
 import random
+import re
 import time
 import uuid
 from contextlib import nullcontext
@@ -677,7 +678,14 @@ class FileCacher(BaseCacher):
         if not self.max_size:
             return
 
-        caches = [str(_) for _ in self.cache_dir.glob(f'*{suffix}') if str(_) not in ignore_keys]
+        caches = [str(_) for _ in self.cache_dir.glob('*')]
+
+        # python version > 3.9, use `Path.rglob` directly.
+        p = re.compile(suffix)
+        caches = [_ for _ in caches if p.search(_)]
+
+        for key in ignore_keys:
+            caches = [_ for _ in caches if key not in _]
 
         if len(caches) > self.max_size:
             try:
