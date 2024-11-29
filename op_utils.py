@@ -1,6 +1,7 @@
 """utils for operating instances of python, decorator usually"""
 import time
 from functools import wraps
+
 from .os_lib import FakeIo
 
 
@@ -9,15 +10,19 @@ class IgnoreException:
     Usage:
         .. code-block:: python
 
-            from utils.os_lib import AutoLog
             ignore_exception = IgnoreException()
 
-            class SimpleClass:
-                @ignore_exception.add_ignore()
-                @ignore_exception.add_ignore(error_message='there is an error')
-                @ignore_exception.add_ignore(err_type=Exception)
-                def func(self):
-                    ...
+            @ignore_exception.add_ignore()
+            def func():
+                raise Exception
+
+            @ignore_exception.add_ignore(error_message='there is an error')
+            def func():
+                raise Exception
+
+            @ignore_exception.add_ignore(err_type=Exception)
+            def func():
+                raise Exception
     """
 
     def __init__(self, verbose=True, stdout_method=print):
@@ -43,21 +48,27 @@ class IgnoreException:
         return wrap2
 
 
+ignore_exception = IgnoreException()
+
+
 class Retry:
     """
     Usage:
         .. code-block:: python
 
-            from utils.os_lib import Retry
-
             retry = Retry()
 
-            class SimpleClass:
-                @retry.add_try()
-                @retry.add_try(error_message='there is an error, sleep %d seconds')
-                @retry.add_try(err_type=Exception)
-                def func(self):
-                    ...
+            @retry.add_try()
+            def func():
+                raise Exception
+
+            @retry.add_try(error_message='there is an error, sleep %d seconds')
+            def func():
+                raise Exception
+
+            @retry.add_try(err_type=Exception)
+            def func():
+                raise Exception
     """
 
     def __init__(self, verbose=True, stdout_method=print, count=3, wait=15):
@@ -93,5 +104,45 @@ class Retry:
         return wrap2
 
 
-ignore_exception = IgnoreException()
 retry = Retry()
+
+
+class RegisterTables:
+    """
+    Usage:
+        .. code-block:: python
+
+            register_tables = RegisterTables()
+
+            @register_tables.add_register()
+            class SimpleClass:
+                ...
+
+            cls = register_tables.get('SimpleClass')
+
+            @register_tables.add_register('k1', 't1')
+            class SimpleClass:
+                ...
+
+            cls = register_tables.get('k1', 't1')
+    """
+
+    def add_register(self, key='', table_name='default'):
+        def wrap(func):
+            if not hasattr(self, table_name):
+                setattr(self, table_name, {})
+
+            getattr(self, table_name)[key or func.__name__] = func
+
+            return func
+
+        return wrap
+
+    def get(self, key, table_name='default'):
+        return getattr(self, table_name)[key]
+
+    def __repr__(self):
+        return str(self.__dict__)
+
+
+register_tables = RegisterTables()

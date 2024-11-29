@@ -8,7 +8,6 @@ import random
 import re
 import time
 import uuid
-from contextlib import nullcontext
 from pathlib import Path
 from typing import List, Iterable
 
@@ -975,7 +974,7 @@ class MilvusCacher(BaseCacher):
 class FakeIo:
     """a placeholder, empty io method to cheat some functions which must use an io method,
     it means that the method do nothing in fact,
-    it is useful to reduce the amounts of code changes
+    it is useful to reduce the number of code changes
 
     Examples
     .. code-block:: python
@@ -1007,43 +1006,6 @@ class FakeIo:
 
     def __call__(self, *args, **kwargs):
         pass
-
-
-class FakeApp:
-    """a placeholder, empty io method to cheat some functions which must use an app method,
-    it means that the method do nothing in fact,
-    it is useful to reduce the amounts of code changes
-
-    Examples
-    .. code-block:: python
-
-        # real app
-        app = FakeApp()
-
-        # fake app
-        app = FakeApp()
-
-        @app.route(...)
-        def func(...):
-            ...
-    """
-
-    def __init__(self, *args, **kwargs):
-        self.config = dict()
-        self.conf = dict()
-        self.__dict__.update(kwargs)
-
-    def register_blueprint(self, *args, **kwargs):
-        pass
-
-    def route(self, *args, **kwargs):
-        return nullcontext
-
-    def post(self, *args, **kwargs):
-        return nullcontext
-
-    def get(self, *args, **kwargs):
-        return nullcontext
 
 
 saver = Saver()

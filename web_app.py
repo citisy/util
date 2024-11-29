@@ -1,5 +1,7 @@
 """utils for creating a web app to provide api endpoints"""
 import json
+from contextlib import nullcontext
+
 import pydantic
 
 
@@ -136,3 +138,40 @@ class FlaskOp:
                 ret = ret.dict()
 
             return jsonify(ret)
+
+
+class FakeApp:
+    """a placeholder, empty endpoint method to cheat some functions which must use an endpoint method,
+    it means that the method do nothing in fact,
+    it is useful to reduce the number of code changes
+
+    Examples
+    .. code-block:: python
+
+        # real app
+        app = FastAPI()
+
+        # fake app
+        app = FakeApp()
+
+        @app.route(...)
+        def func(...):
+            ...
+    """
+
+    def __init__(self, *args, **kwargs):
+        self.config = dict()
+        self.conf = dict()
+        self.__dict__.update(kwargs)
+
+    def register_blueprint(self, *args, **kwargs):
+        pass
+
+    def route(self, *args, **kwargs):
+        return nullcontext
+
+    def post(self, *args, **kwargs):
+        return nullcontext
+
+    def get(self, *args, **kwargs):
+        return nullcontext
