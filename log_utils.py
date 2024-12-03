@@ -501,15 +501,19 @@ def get_class_annotations(cls):
                 tmp['default'] = v2
             anno_dict[k] = tmp
 
+        for k, v2 in dic.items():
+            # todo, `classmethod` and `staticmethod` can not be quit
+            if not k.startswith('__') and k not in anno_dict and not inspect.isfunction(v2):
+                anno_dict[k] = dict(default=v2)
+
         return anno_dict
 
-    if not hasattr(cls, '__annotations__'):
-        return dict()
-
-    anno_dict = parse_anno(cls)
+    anno_dict = {}
 
     for parent_cls in cls.__mro__:
         if hasattr(parent_cls, '__annotations__'):
-            anno_dict.update(parse_anno(parent_cls))
+            tmp = parse_anno(parent_cls)
+            tmp.update(anno_dict)
+            anno_dict = tmp
 
     return anno_dict
