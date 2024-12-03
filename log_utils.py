@@ -465,24 +465,39 @@ class MemoryInfo:
         return info
 
 
-def class_info(ins):
+def get_class_info(ins):
     import inspect
     args = inspect.getfullargspec(ins.__init__).args
     args.pop(0)
     return dict(
         doc=ins.__doc__,
+        path=ins.__module__,
         args=args
     )
 
 
 def get_class_annotations(cls):
+    def parse_anno(c):
+        annotations = c.__annotations__
+        dic = c.__dict__
+        anno_dict = {}
+
+        for k, v1 in annotations.items():
+            tmp = dict(type=v1)
+            if k in dic:
+                v2 = dic[k]
+                tmp['default'] = v2
+            anno_dict[k] = tmp
+
+        return anno_dict
+
     if not hasattr(cls, '__annotations__'):
         return dict()
 
-    annotations = cls.__annotations__
+    anno_dict = parse_anno(cls)
 
-    for parent_cls in cls.__bases__:
-        parent_annotations = get_class_annotations(parent_cls)
-        annotations.update(parent_annotations)
+    for parent_cls in cls.__mro__:
+        if hasattr(parent_cls, '__annotations__'):
+            anno_dict.update(parse_anno(parent_cls))
 
-    return annotations
+    return anno_dict

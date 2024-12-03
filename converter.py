@@ -35,6 +35,8 @@ class DataConvert:
             obj = cls.img_array_to_constant(obj)
         elif isinstance(obj, np.ndarray) and obj.dtype != np.uint8:
             obj = cls.np_to_constant(obj)
+        else:
+            obj = str(obj)
 
         return obj
 
