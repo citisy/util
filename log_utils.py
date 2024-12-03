@@ -1,10 +1,12 @@
 """utils for logging"""
+import inspect
 import logging
 import logging.config
 import os
 import time
 from functools import wraps
 from logging.handlers import TimedRotatingFileHandler
+from typing import Annotated, get_origin
 
 import psutil
 
@@ -466,12 +468,11 @@ class MemoryInfo:
 
 
 def get_class_info(ins):
-    import inspect
     args = inspect.getfullargspec(ins.__init__).args
     args.pop(0)
     return dict(
         doc=ins.__doc__,
-        path=ins.__module__,
+        path=f'{ins.__module__}.{ins.__name__}',
         args=args
     )
 
@@ -483,7 +484,18 @@ def get_class_annotations(cls):
         anno_dict = {}
 
         for k, v1 in annotations.items():
-            tmp = dict(type=v1)
+            if inspect.isfunction(v1):
+                continue
+
+            if get_origin(v1) is Annotated:
+                tmp = dict(
+                    type=v1.__origin__,
+                    comments=v1.__metadata__
+                )
+
+            else:
+                tmp = dict(type=v1)
+
             if k in dic:
                 v2 = dic[k]
                 tmp['default'] = v2
