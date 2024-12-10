@@ -799,46 +799,51 @@ class Converter:
         def parse(s):
             """split the string with wildcards, and retrun their indexes
             Examples:
-                # idx1 is wildcard's values, idx2 is start index of wildcard in string
+                # key is wildcard's values, idx is start index of wildcard in string
                 >>> parse('a.{0}.a')
-                (('a', '.', '{0}', '.', 'a'), {'idx1': ['_0'], 'idx2': [2], 'ops': [None]})
+                (('a', '.', '{0}', '.', 'a'), {'key': ['_0'], 'idx': [2], 'ops': ['']})
 
                 >>> parse('a.{[0]+1}.a')
-                (('a', '.', '{0}', '.', 'a'), {'idx1': ['_0'], 'idx2': [2], 'ops': ['[##]+1']})
+                (('a', '.', '{0}', '.', 'a'), {'key': ['_0'], 'idx': [2], 'ops': ['[0]+1']})
             """
             match = re.findall('\{.+?\}', s)
-            end, tmp, spans, idx1, ops = 0, s, [], [], []
+            end, tmp, spans, key, ops = 0, s, [], [], []
             for m in match:
-                op = None
+                op = ''
                 start = tmp.index(m) + end
                 end = start + len(m)
                 spans.append((start, end))
                 k = m[1:-1]
 
-                r = re.search('\[(.+?)\]', k)
+                r = re.findall('\[(.+?)\]', k)
                 if r:
-                    op = k.replace(r.group(0), '[##]')
-                    k = r.group(1)
+                    op = k
+                    for i, rr in enumerate(r):
+                        if rr.isdigit():
+                            op = op.replace(f'[{rr}]', f'[_{rr}]')
+                            r[i] = '_' + rr
+                    k = '#'.join(r)
 
                 if k.isdigit():
+                    # digit str would raise error by f'(?P<{_k}>.+?)'
                     k = '_' + k
 
-                idx1.append(k)
+                key.append(k)
                 ops.append(op)
                 tmp = s[end:]
 
             r = []
             end = 0
-            idx2 = []
+            idx = []
             for i, span in enumerate(spans):
                 start, end1 = span
                 tmp = list(s[end:start])
                 r += tmp + [match[i]]
-                idx2.append(len(r) - 1)
+                idx.append(len(r) - 1)
                 end = end1
 
             r += list(s[end: len(s)])
-            return tuple(r), {'idx1': idx1, 'idx2': idx2, 'ops': ops}
+            return tuple(r), {'key': key, 'idx': idx, 'ops': ops}
 
         split_convert_dict = {}
         a_values, b_values = {}, {}
@@ -863,26 +868,34 @@ class Converter:
 
                 p, pa = '', ''
                 for i, s in enumerate(a):
-                    if i in a_value['idx2']:
-                        ii = a_value['idx2'].index(i)
-                        _k = a_value["idx1"][ii]
+                    if i in a_value['idx']:
+                        ii = a_value['idx'].index(i)
+                        _k = a_value["key"][ii]
                         p += f'(?P<{_k}>.+?)'
                         pa += '{' + _k + '}'
                     else:
                         p += '\\' + s if s == '.' else s
                         pa += s
 
-                if a_value['idx2']:
+                if a_value['idx']:
                     ra = re.search(p, k)
                     r = ra.groupdict()
                     pa = pa.format(**r)
 
                     b = list(b)
-                    for idx1, idx2, op in zip(b_value['idx1'], b_value['idx2'], b_value['ops']):
-                        _v = r[idx1]
-                        if op:
-                            _v = str(eval(op.replace('[##]', f"{_v}")))
-                        b[idx2] = _v
+                    for key, idx, op in zip(b_value['key'], b_value['idx'], b_value['ops']):
+                        if '#' in key:
+                            keys = key.split('#')
+                            for key in keys:
+                                _v = r[key]
+                                op = op.replace(f'[{key}]', f"{_v}")
+                            _v = str(eval(op))
+                        else:
+                            _v = r[key]
+                            if op:
+                                _v = str(eval(op.replace(f'[{key}]', f"{_v}")))
+
+                        b[idx] = _v
 
                 # replace before string to after string
                 pb = ''.join(b)
