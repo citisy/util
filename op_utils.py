@@ -93,8 +93,8 @@ class Retry:
                         if i >= self.count - 1:
                             raise e
 
-                        msg = error_message or f'Something error occur, sleep %d seconds, and then retry'
-                        msg = msg % self.wait
+                        msg = error_message or 'Something error occur: "{e}", sleep {wait} seconds, and then retry!'
+                        msg = msg.format(e=e, wait=self.wait)
                         self.stdout_method(msg)
                         time.sleep(self.wait)
                         self.stdout_method(f'{i + 2}th try!')

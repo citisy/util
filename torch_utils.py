@@ -300,10 +300,10 @@ class ModuleManager:
             # prevent to no grad
             if is_first_layer:
                 for arg in args:
-                    if isinstance(arg, torch.Tensor):
+                    if isinstance(arg, torch.Tensor) and arg.dtype.is_floating_point:   # only float tensor has grad
                         arg.requires_grad_(True)
                 for arg in kwargs.values():
-                    if isinstance(arg, torch.Tensor):
+                    if isinstance(arg, torch.Tensor) and arg.dtype.is_floating_point:   # only float tensor has grad
                         arg.requires_grad_(True)
             # note, if having kwargs, use `use_reentrant=False`
             return checkpoint(call_func, *args, use_reentrant=False, **kwargs)
@@ -973,9 +973,10 @@ class Converter:
 
         for i, (k, v) in enumerate(state_dict.items()):
             tmp = re.split(r'[/\.]', k)
-            suffix = tmp[-1]
-            suffix = cls.convert_tf_types.get(key_types[i], suffix)
-            k = '.'.join(tmp[:-1]) + '.' + suffix
+            if len(tmp) > 1:
+                suffix = tmp[-1]
+                suffix = cls.convert_tf_types.get(key_types[i], suffix)
+                k = '.'.join(tmp[:-1]) + '.' + suffix
 
             if key_types[i] == 'w' and value_types[i] in convert_tf_funcs:
                 v = convert_tf_funcs[value_types[i]](v)

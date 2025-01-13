@@ -240,9 +240,9 @@ class MaskBox:
     """Some definition:
     mask: grey image
         2-d array with shape of (h, w), falls in [0, 255]
-    masks: grey images
+    masks: grey images with multi classes
         3-d array with shape of (c, h, w), falls in [0, 255], c gives the classes
-    label_mask: label image
+    label_mask: label image, each pixel is a classes
         2-d array with shape of (h, w), falls in [0, +inf)
     bboxes: bounding boxes of objections
         2-d array with shape of (n, 4), 4 gives (x1, y1, x2, y2)
@@ -605,9 +605,9 @@ class GridBox:
         always with property of (edges(l, r, t, d), n_grids(n_grid_x, n_grid_y))
     lines: lines of grids
         2-d array with shape of ((nx+1)*(ny+1), 4), 4 gives (x1, y1, x2, y2)
-    cols: cols of grid lines
+    cols: cols of grid lines, must be vertical
         1-d array with shape of (nx+1, ), gives the y-axis
-    rows: rows of grid lines
+    rows: rows of grid lines, must be horizontal
         1-d array with shape of (ny+1, ), gives the x-axis
     points: intersection points of grids lines
         ((nx+1)*(ny+1), 2), 2 gives (x, y)

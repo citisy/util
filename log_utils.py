@@ -510,10 +510,11 @@ def get_class_annotations(cls):
 
     anno_dict = {}
 
-    for parent_cls in cls.__mro__:
-        if hasattr(parent_cls, '__annotations__'):
-            tmp = parse_anno(parent_cls)
-            tmp.update(anno_dict)
-            anno_dict = tmp
+    if hasattr(cls, '__mro__'):
+        for parent_cls in cls.__mro__:
+            if hasattr(parent_cls, '__annotations__'):
+                tmp = parse_anno(parent_cls)
+                tmp.update(anno_dict)
+                anno_dict = tmp
 
     return anno_dict

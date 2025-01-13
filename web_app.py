@@ -28,7 +28,10 @@ class FastapiOp:
         for path1, cfg in configs.items():
             sub_app = cls.create_sub_app()
             for path2, router_kwargs in cfg.items():
-                cls.register_post_router(sub_app, path2, **router_kwargs)
+                if router_kwargs.get('method', 'post').lower() == 'post':
+                    cls.register_post_router(sub_app, path2, **router_kwargs)
+                else:
+                    cls.register_get_router(sub_app, path2, **router_kwargs)
 
             app.include_router(sub_app, prefix=path1)
 
@@ -61,16 +64,37 @@ class FastapiOp:
             func,
             request_template: 'pydantic.BaseModel()' = None,
             response_template: 'pydantic.BaseModel()' = None,
+            summary: str = None,
             **post_kwargs
     ):
         request_template = dict if request_template is None else request_template
-        response_template = dict if response_template is None else response_template
+        response_template = None if response_template is None else response_template
 
-        @app.post(path, response_model=response_template)
+        @app.post(path, response_model=response_template, summary=summary)
         def post(data: request_template):
             if isinstance(data, pydantic.BaseModel):
                 data = data.dict()
             ret = func(data, **post_kwargs)
+            return ret
+
+    @staticmethod
+    def register_get_router(
+            app: 'FastAPI' or 'APIRouter',
+            path,
+            func,
+            request_template: 'pydantic.BaseModel()' = None,
+            response_template: 'pydantic.BaseModel()' = None,
+            summary: str = None,
+            **get_kwargs
+    ):
+        request_template = dict if request_template is None else request_template
+        response_template = None if response_template is None else response_template
+
+        @app.get(path, response_model=response_template, summary=summary)
+        def get(data: request_template):
+            if isinstance(data, pydantic.BaseModel):
+                data = data.dict()
+            ret = func(data, **get_kwargs)
             return ret
 
 
@@ -94,7 +118,10 @@ class FlaskOp:
         for path1, cfg in configs.items():
             sub_app = cls.create_sub_app(path1)
             for path2, router_kwargs in cfg.items():
-                cls.register_post_router(sub_app, path2, **router_kwargs)
+                if router_kwargs.get('method', 'post').lower() == 'post':
+                    cls.register_post_router(sub_app, path2, **router_kwargs)
+                else:
+                    cls.register_get_router(sub_app, path2, **router_kwargs)
 
             app.register_blueprint(sub_app, url_prefix=path1)
 
@@ -119,6 +146,7 @@ class FlaskOp:
             func,
             request_template: 'pydantic.BaseModel()' = None,
             response_template: 'pydantic.BaseModel()' = None,
+            summary: str = None,
             **post_kwargs
     ):
         from flask import jsonify, request
@@ -132,6 +160,35 @@ class FlaskOp:
                 data = data.dict()
 
             ret = func(data, **post_kwargs)
+
+            if response_template:
+                ret = response_template(**ret)
+                ret = ret.dict()
+
+            return jsonify(ret)
+
+
+    @staticmethod
+    def register_get_router(
+            app: 'Flask' or 'Blueprint',
+            path,
+            func,
+            request_template: 'pydantic.BaseModel()' = None,
+            response_template: 'pydantic.BaseModel()' = None,
+            summary: str = None,
+            **get_kwargs
+    ):
+        from flask import jsonify, request
+
+        @app.get(path, endpoint=path)
+        def get():
+            data = request.get_data().decode('utf-8')
+            data = json.loads(data)
+            if request_template:
+                data = request_template(**data)
+                data = data.dict()
+
+            ret = func(data, **get_kwargs)
 
             if response_template:
                 ret = response_template(**ret)

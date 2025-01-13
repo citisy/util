@@ -844,61 +844,209 @@ class ESCacher(BaseCacher):
     """todo"""
 
 
-class PGSQLCacher(BaseCacher):
-    def __init__(self, host='127.0.0.1', port=5432, user=None, password=None, database=None,
-                 table=None,
-                 max_size=None, verbose=True, stdout_method=print,
-                 **pg_kwargs):
-        import psycopg2  # pip install psycopg2-binary
+class MySqlCacher(BaseCacher):
+    host = '127.0.0.1'
+    port = 3306
+    user = None
+    password = None
+    database = None
+    conn_kwargs = {}
 
-        self.conn = psycopg2.connect(
-            host=host,
-            port=port,
-            user=user,
-            password=password,
-            database=database,
-            **pg_kwargs
-        )
+    def __init__(
+            self, table=None,
+            max_size=None, verbose=True, stdout_method=print,
+            **kwargs
+    ):
+        self.__dict__.update(kwargs)
+
         self.table = table
+        assert self.table is not None
+
+        _escape_table = [chr(x) for x in range(128)]
+        _escape_table[0] = "\\0"
+        _escape_table[ord("\\")] = "\\\\"
+        _escape_table[ord("\n")] = "\\n"
+        _escape_table[ord("\r")] = "\\r"
+        _escape_table[ord("\032")] = "\\Z"
+        _escape_table[ord('"')] = '\\"'
+        _escape_table[ord("'")] = "\\'"
+        self.escape_table = _escape_table
+
         self.max_size = max_size
         self.verbose = verbose
         self.stdout_method = stdout_method if verbose else FakeIo()
 
-    def get_one(self, **kwargs) -> pd.DataFrame:
+    @property
+    def connection(self):
+        # note, each time execute the sql, initialize a new connection, 'cause one connection would use the cache result
+        import pymysql
+        return pymysql.connect(
+            host=self.host,
+            port=self.port,
+            user=self.user,
+            password=self.password,
+            database=self.database,
+            **self.conn_kwargs
+        )
+
+    def cache_one(self, obj: dict, allow_duplicates=True, **kwargs):
+        if allow_duplicates or not kwargs:
+            last_id = self._add(obj, **kwargs)
+
+        else:
+            if self.get_one(**kwargs):
+                last_id = self._update(obj, **kwargs)
+            else:
+                last_id = self._add(obj, **kwargs)
+
+        return last_id
+
+    def std_value(self, v):
+        if isinstance(v, (dict, list, tuple)):
+            v = json.dumps(v, ensure_ascii=False)
+
+        v = self.std_str_value(v)
+
+        return v
+
+    def std_str_value(self, v):
+        if isinstance(v, str):
+            v = v.translate(self.escape_table)
+            v = f'"{v}"'
+
+        return v
+
+    def make_where_condition(self, obj: dict) -> list:
+        where_conditions = []
+        for k, v in obj.items():
+            if isinstance(v, (list, tuple, set)):
+                values = ''
+                for vv in v:
+                    vv = self.std_str_value(vv)
+                    values += f'{vv},'
+                values = values[:-1]
+                where_conditions.append(f'{k} in ({values})')
+            else:
+                v = self.std_str_value(v)
+                where_conditions.append(f'{k}={v}')
+
+        return where_conditions
+
+    def make_set_statements(self, obj: dict) -> list:
+        set_statements = []
+        for k, v in obj.items():
+            v = self.std_value(v)
+            set_statements.append(f'{k}={v}')
+
+        return set_statements
+
+    def _add(self, obj: dict, **kwargs):
+        list_columns = []
+        list_values = []
+
+        if obj:
+            for k, v in obj.items():
+                list_columns.append(k)
+                list_values.append(v)
+
+        for k, v in kwargs.items():
+            list_columns.append(k)
+            list_values.append(v)
+
+        columns = ','.join(list_columns)
+        values = ''
+        for v in list_values:
+            v = self.std_value(v)
+            values += f'{v},'
+        values = values[:-1]
+
+        sql = f'INSERT INTO {self.table} ({columns}) VALUES ({values})'
+
+        connection = self.connection
+        with connection.cursor() as cursor:
+            cursor.execute(sql)
+            last_id = cursor.lastrowid
+            connection.commit()
+
+        return last_id
+
+    def _update(self, obj: dict, **kwargs):
+        set_statements = self.make_set_statements(obj)
+        set_statements = ', '.join(set_statements)
+
+        where_conditions = self.make_where_condition(kwargs)
+        where_conditions = ' and '.join(where_conditions)
+
+        sql = f"UPDATE {self.table} SET {set_statements} WHERE {where_conditions}"
+
+        connection = self.connection
+        with connection.cursor() as cursor:
+            cursor.execute(sql)
+            last_id = cursor.lastrowid
+            connection.commit()
+
+        return last_id
+
+    def get_one(self, **kwargs) -> dict:
         """
         Usage:
-            >>> PGSQLCacher().get_one(id=0)
-            >>> PGSQLCacher().get_batch(k1='s1', k2='s2')
+            >>> MySqlCacher().get_one(id=0)
+            >>> MySqlCacher().get_one(k1='s1', k2='s2')
 
         """
-        s = []
-        for k, v in kwargs.items():
-            s.append(f'{k}={v}')
-        s = ' and '.join(s)
-        df = pd.read_sql(f"select * from {self.table} where {s} limit 1;", con=self.conn)
+        where_conditions = self.make_where_condition(kwargs)
+        where_conditions = ' and '.join(where_conditions)
+        sql = f"select * from {self.table} where {where_conditions} limit 1;"
 
-        return df
+        with self.connection.cursor() as cursor:
+            cursor.execute(sql)
+            row = cursor.fetchone()
+            if row:
+                fields = [i[0] for i in cursor.description]
+                data = dict(zip(fields, row))
+            else:
+                data = {}
 
-    def get_batch(self, size=None, **kwargs):
+        return data
+
+    def get_batch(self, size=None, **kwargs) -> List[dict]:
         """
         Usage:
-            >>> PGSQLCacher().get_batch(id=[0, 1])
-            >>> PGSQLCacher().get_batch(k1=['s1', 's2'], k2=['s3'])
+            >>> MySqlCacher().get_batch(id=[0, 1])
+            >>> MySqlCacher().get_batch(k1=['s1', 's2'], k2=['s3'])
 
         """
-        s = []
-        for k, v in kwargs.items():
-            v = [str(vv) for vv in v]
-            s.append(f'{k} in ({", ".join(v)})')
-
-        s = ' and '.join(s)
-        sql = f"select * from {self.table} where {s}"
+        where_conditions = self.make_where_condition(kwargs)
+        where_conditions = ' and '.join(where_conditions)
+        sql = f"select * from {self.table} where {where_conditions}"
         if size:
             sql += f'limit {size}'
 
-        df = pd.read_sql(sql, con=self.conn)
+        with self.connection.cursor() as cursor:
+            cursor.execute(sql)
+            result = cursor.fetchall()
+            fields = [i[0] for i in cursor.description]
+            data = [dict(zip(fields, row)) for row in result]
 
-        return df
+        return data
+
+
+class PGSQLCacher(MySqlCacher):
+    port = 5432
+
+    def make_connection(self):
+        import psycopg2  # pip install psycopg2-binary
+
+        conn = psycopg2.connect(
+            host=self.host,
+            port=self.port,
+            user=self.user,
+            password=self.password,
+            database=self.database,
+            **self.conn_kwargs
+        )
+
+        return conn
 
 
 class MilvusCacher(BaseCacher):
