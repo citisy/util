@@ -14,7 +14,7 @@ from typing import List, Iterable
 import cv2
 import numpy as np
 import pandas as pd
-import yaml
+import yaml     # pip install PyYAML
 
 
 def mk_dir(dir_path):
@@ -962,11 +962,11 @@ class MySqlCacher(BaseCacher):
 
         sql = f'INSERT INTO {self.table} ({columns}) VALUES ({values})'
 
-        connection = self.connection
-        with connection.cursor() as cursor:
-            cursor.execute(sql)
-            last_id = cursor.lastrowid
-            connection.commit()
+        with self.connection as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql)
+                last_id = cursor.lastrowid
+                connection.commit()
 
         return last_id
 
@@ -979,15 +979,15 @@ class MySqlCacher(BaseCacher):
 
         sql = f"UPDATE {self.table} SET {set_statements} WHERE {where_conditions}"
 
-        connection = self.connection
-        with connection.cursor() as cursor:
-            cursor.execute(sql)
-            last_id = cursor.lastrowid
-            connection.commit()
+        with self.connection as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql)
+                last_id = cursor.lastrowid
+                connection.commit()
 
         return last_id
 
-    def get_one(self, **kwargs) -> dict:
+    def get_one(self, additional_sql='', **kwargs) -> dict:
         """
         Usage:
             >>> MySqlCacher().get_one(id=0)
@@ -996,20 +996,21 @@ class MySqlCacher(BaseCacher):
         """
         where_conditions = self.make_where_condition(kwargs)
         where_conditions = ' and '.join(where_conditions)
-        sql = f"select * from {self.table} where {where_conditions} limit 1;"
+        sql = f"select * from {self.table} where {where_conditions} {additional_sql} limit 1"
 
-        with self.connection.cursor() as cursor:
-            cursor.execute(sql)
-            row = cursor.fetchone()
-            if row:
-                fields = [i[0] for i in cursor.description]
-                data = dict(zip(fields, row))
-            else:
-                data = {}
+        with self.connection as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql)
+                row = cursor.fetchone()
+                if row:
+                    fields = [i[0] for i in cursor.description]
+                    data = dict(zip(fields, row))
+                else:
+                    data = {}
 
         return data
 
-    def get_batch(self, size=None, **kwargs) -> List[dict]:
+    def get_batch(self, size=None, additional_sql='', **kwargs) -> List[dict]:
         """
         Usage:
             >>> MySqlCacher().get_batch(id=[0, 1])
@@ -1018,15 +1019,16 @@ class MySqlCacher(BaseCacher):
         """
         where_conditions = self.make_where_condition(kwargs)
         where_conditions = ' and '.join(where_conditions)
-        sql = f"select * from {self.table} where {where_conditions}"
+        sql = f"select * from {self.table} where {where_conditions} {additional_sql}"
         if size:
-            sql += f'limit {size}'
+            sql += f' limit {size}'
 
-        with self.connection.cursor() as cursor:
-            cursor.execute(sql)
-            result = cursor.fetchall()
-            fields = [i[0] for i in cursor.description]
-            data = [dict(zip(fields, row)) for row in result]
+        with self.connection as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql)
+                result = cursor.fetchall()
+                fields = [i[0] for i in cursor.description]
+                data = [dict(zip(fields, row)) for row in result]
 
         return data
 

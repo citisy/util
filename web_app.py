@@ -17,13 +17,13 @@ class FastapiOp:
     """
 
     @classmethod
-    def from_configs(cls, configs: dict):
+    def from_configs(cls, configs: dict, app_configs=dict()):
         """
         {path1: {path2: router_kwargs}}
         """
         from fastapi.middleware.cors import CORSMiddleware
 
-        app = cls.create_app()
+        app = cls.create_app(**app_configs)
 
         for path1, cfg in configs.items():
             sub_app = cls.create_sub_app()
@@ -46,10 +46,10 @@ class FastapiOp:
         return app
 
     @staticmethod
-    def create_app():
+    def create_app(**app_configs):
         from fastapi import FastAPI
 
-        return FastAPI()
+        return FastAPI(**app_configs)
 
     @staticmethod
     def create_sub_app():
@@ -73,7 +73,7 @@ class FastapiOp:
         @app.post(path, response_model=response_template, summary=summary)
         def post(data: request_template):
             if isinstance(data, pydantic.BaseModel):
-                data = data.dict()
+                data = data.dict(exclude_none=True)
             ret = func(data, **post_kwargs)
             return ret
 
